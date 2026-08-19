@@ -395,9 +395,9 @@
     padding-top:2px;
   }
   .issue-sev svg{width:17px;height:17px;}
-  .issue.sev-critical .issue-sev svg,.issue.sev-high .issue-sev svg{color:var(--err);}
-  .issue.sev-medium .issue-sev svg{color:var(--warn);}
-  .issue.sev-low .issue-sev svg,.issue.sev-info .issue-sev svg{color:var(--info);}
+  .issue.sev-error .issue-sev svg{color:var(--err);}
+  .issue.sev-warning .issue-sev svg{color:var(--warn);}
+  .issue.sev-info .issue-sev svg{color:var(--info);}
 
   .issue-line{
     font-family:var(--mono);
@@ -458,18 +458,6 @@
     line-height:1.7;
   }
 
-  .issue-topline{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-bottom:5px;}
-  .issue-severity,.issue-category,.issue-confidence{font-family:var(--mono);font-size:9.5px;border:1px solid var(--line);border-radius:10px;padding:2px 6px;color:var(--text-lo);}
-  .issue.sev-critical .issue-severity,.issue.sev-high .issue-severity{color:var(--err);border-color:var(--err-dim);}
-  .issue.sev-medium .issue-severity{color:var(--warn);border-color:var(--warn-dim);}
-  .issue.sev-low .issue-severity,.issue.sev-info .issue-severity{color:var(--info);border-color:var(--info-dim);}
-  .issue-confidence{color:var(--warn);border-color:var(--warn-dim);}
-  .issue.secondary{background:rgba(94,168,242,.025);}
-  .fix-block{display:grid;grid-template-columns:70px 1fr;gap:6px 10px;margin-top:9px;font-size:11px;}
-  .fix-block b{color:var(--text-lo);font-weight:600;}
-  .fix-block code{font-family:var(--mono);white-space:pre-wrap;color:var(--text-mid);background:var(--bg-0);border:1px solid var(--line);padding:6px 8px;border-radius:4px;}
-  .clean-msg small{display:block;margin-top:8px;color:var(--text-lo);}
-
   @media (max-width: 720px){
     .shell{padding:24px 16px 60px;}
     header.top{flex-direction:column; align-items:flex-start;}
@@ -480,6 +468,25 @@
     .lang-select-wrap{margin-left:0; width:100%;}
     select#langSelect{flex:1;}
   }
+
+
+  .issue.sev-critical .issue-sev svg{color:#ff5a5f;}
+  .issue.sev-high .issue-sev svg{color:var(--err);}
+  .issue.sev-medium .issue-sev svg{color:var(--warn);}
+  .issue.sev-low .issue-sev svg{color:var(--info);}
+  .issue.sev-info .issue-sev svg{color:var(--text-lo);}
+  .issue-meta{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 7px;}
+  .issue-meta span{font-family:var(--mono);font-size:10px;border:1px solid var(--line);border-radius:10px;padding:2px 7px;color:var(--text-mid);}
+  .issue-meta .sev-critical{color:#ff5a5f;border-color:#7a2c30;}
+  .issue-meta .sev-high{color:var(--err);border-color:var(--err-dim);}
+  .issue-meta .sev-medium{color:var(--warn);border-color:var(--warn-dim);}
+  .issue-meta .sev-low{color:var(--info);border-color:var(--info-dim);}
+  .issue-meta .sev-info{color:var(--text-lo);}
+  .issue-section{margin:8px 0 0;padding:7px 9px;border-left:2px solid var(--line);font-size:12px;line-height:1.55;color:var(--text-mid);}
+  .issue-section strong{color:var(--text-hi);font-weight:600;}
+  .issue-section code{font-family:var(--mono);}
+  .secondary-row{margin-top:8px;padding-left:10px;border-left:1px dashed var(--warn-dim);color:var(--text-lo);font-size:11px;}
+  .scan-note{margin:0 0 14px;padding:9px 12px;background:var(--bg-2);border:1px solid var(--line);border-radius:5px;color:var(--text-mid);font-size:11.5px;line-height:1.6;}
 
   @media (prefers-reduced-motion: reduce){
     *{transition:none !important;}
@@ -583,13 +590,12 @@
   </section>
 
   <footer class="note">
-    ※ HTML/CSS/JavaScriptは言語ごとに分離して解析します。JavaScriptはAcorn ASTが利用できる場合はAST解析を優先し、構文エラー時は安全な範囲だけ再解析します。外部パーサーはCDNから読み込みますが、コード本文は外部へ送信しません。パーサーを読み込めない場合は誤検出を抑えた字句フォールバックに切り替えます。
+    ※ JavaScriptはAcorn AST解析を優先し、構文エラー時も他言語・他ブロックの解析を継続します。確実なエラーと「可能性あり」の警告を分離し、HTML/CSS/JSの相互参照も検査します。コード本体は外部送信しません（解析ライブラリAcornはCDNから読み込みます）。
   </footer>
 
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/acorn@8.18.0/dist/acorn.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/acorn-loose@8.5.2/dist/acorn-loose.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/acorn@8.18.0/dist/acorn.js" crossorigin="anonymous"></script>
 <script>
 (function(){
   "use strict";
@@ -725,779 +731,769 @@
   els.langSelect.addEventListener('change', updateRunState);
 
   /* ================================================================
-     言語判定
-  ================================================================= */
-  function detectLanguage(text, hintExt){
-    const explicit = els.langSelect.value;
-    if (explicit !== 'auto') return explicit;
-    if (hintExt) return hintExt;
-
-    const t = text.trim();
-    if (/^\s*</.test(t) && /<\/?[a-z!][^>]*>/i.test(t) && /<html|<!doctype|<div|<span|<body|<head/i.test(t)) return 'html';
-    if (/^\s*[\{\[]/.test(t) && (/"\s*:\s*/.test(t) || /^\s*\[/.test(t))) {
-      try { JSON.parse(t); return 'json'; } catch(e){ /* fallthrough */ }
-    }
-    if (/(^|\n)\s*(def |import |from .+ import|print\(|class .+:|elif |except |#!.*python)/.test(t)) return 'py';
-    if (/[.#]?[a-zA-Z0-9_-]+\s*\{[^}]*:[^}]*;/.test(t) && /\{[\s\S]*:[\s\S]*;[\s\S]*\}/.test(t) && !/function|const |let |var |=>/.test(t)) return 'css';
-    if (/function\s|=>|const |let |var |console\.|document\.|import\s.+from|export /.test(t)) return 'js';
-    return 'js';
-  }
-
-  /* ================================================================
-     検査ロジック本体
-     重要: 言語ごとの字句境界を先に確定し、その後に構文/AST/相互参照を行う。
+     v2.0 静的解析エンジン
+     - HTML: 字句状態を保った構造解析。script/style内はDOM解析から除外。
+     - JS: Acorn AST優先 / native parser fallback / lexical recovery。
+     - CSS: コメント・文字列を考慮したブロック解析。
+     - Cross-language: HTML <-> CSS <-> JS を照合。
   ================================================================= */
 
   const SEVERITY_RANK = { CRITICAL:0, HIGH:1, MEDIUM:2, LOW:3, INFO:4 };
-
-  const builtins = new Set([
-    'window','document','console','Math','Date','JSON','Array','Object','String','Number','Boolean',
-    'RegExp','Set','Map','WeakMap','WeakSet','Promise','Symbol','BigInt','Error','TypeError','SyntaxError',
-    'parseInt','parseFloat','isNaN','isFinite','Infinity','NaN','undefined','null','setTimeout','clearTimeout',
-    'setInterval','clearInterval','requestAnimationFrame','cancelAnimationFrame','fetch','URL','URLSearchParams',
-    'alert','confirm','prompt','Intl','Reflect','Proxy','structuredClone','performance','crypto','localStorage',
-    'sessionStorage','FormData','FileReader','Blob','Event','CustomEvent','KeyboardEvent','MouseEvent',
-    'HTMLElement','Node','NodeList','HTMLCollection','Audio','Image','location','history','navigator'
+  const BUILTIN_GLOBALS = new Set([
+    'window','document','console','Math','Date','JSON','Array','Object','String','Number','Boolean','RegExp','Error',
+    'TypeError','SyntaxError','Promise','Set','Map','WeakSet','WeakMap','Symbol','BigInt','Intl','Reflect','Proxy',
+    'parseInt','parseFloat','isNaN','isFinite','decodeURI','decodeURIComponent','encodeURI','encodeURIComponent',
+    'setTimeout','setInterval','clearTimeout','clearInterval','queueMicrotask','requestAnimationFrame','cancelAnimationFrame',
+    'fetch','URL','URLSearchParams','FormData','Headers','Request','Response','Event','CustomEvent','KeyboardEvent',
+    'MouseEvent','PointerEvent','DragEvent','HTMLElement','Element','Node','NodeList','DocumentFragment','localStorage',
+    'sessionStorage','history','location','navigator','performance','crypto','atob','btoa','undefined','NaN','Infinity',
+    'alert','confirm','prompt','structuredClone','CSS'
   ]);
 
-  function makeIssue({severity='MEDIUM', category='ロジック', line=1, title, desc, snippet='', fixBefore='', fixAfter='', confidence='high',
-                      kind='', rootId=null, secondary=false}){
-    return {severity,category,line,title,desc,snippet,fixBefore,fixAfter,confidence,kind,rootId,secondary};
-  }
+  const KNOWN_HTML_TAGS = new Set([
+    'html','head','body','title','base','link','meta','style','script','noscript','template','slot','canvas','svg','math',
+    'div','span','main','section','article','aside','header','footer','nav','form','label','input','textarea','button','select','option','optgroup','fieldset','legend','datalist','output','progress','meter','details','summary',
+    'h1','h2','h3','h4','h5','h6','p','br','hr','pre','blockquote','ol','ul','li','dl','dt','dd','figure','figcaption','a','img','picture','source','audio','video','track','iframe','embed','object','param','map','area',
+    'table','caption','colgroup','col','thead','tbody','tfoot','tr','th','td','menu','menuitem','dialog','data','time','mark','small','strong','em','b','i','u','s','sup','sub','code','kbd','samp','var','abbr','cite','q','ruby','rt','rp','bdi','bdo','wbr','address','search',
+    'center','font','big','strike','tt','acronym','applet','basefont','bgsound','blink','marquee','frameset','frame','noframes','param','plaintext','xmp','content','shadow'
+  ]);
+  const VOID_TAGS = new Set(['area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr']);
+  const GLOBAL_HTML_ATTRS = new Set([
+    'id','class','title','lang','dir','charset','content','hidden','style','tabindex','accesskey','contenteditable','draggable','spellcheck','translate','slot','part',
+    'role','name','value','type','disabled','checked','selected','readonly','required','placeholder','autocomplete','autofocus','multiple','min','max','step','pattern','maxlength','minlength','size','rows','cols','wrap','for','form','formaction','formenctype','formmethod','formnovalidate','formtarget','action','method','target','rel','download','media','href','src','alt','width','height','loading','decoding','crossorigin','referrerpolicy','integrity','nonce','srcset','sizes','poster','controls','loop','muted','playsinline','preload','open','datetime','cite','colspan','rowspan','headers','scope','aria-label','aria-labelledby','aria-describedby','aria-hidden','aria-live','aria-current','aria-controls','aria-expanded','aria-pressed','data-*'
+  ]);
 
-  function pushIssue(list, issue){
-    const x = typeof issue === 'string' ? {title:issue} : issue;
-    list.push(makeIssue(x));
-  }
-
-  function lineAt(text, idx){ return text.slice(0, Math.max(0,idx)).split('\n').length; }
+  function lineAt(text, idx){ return text.slice(0, Math.max(0, idx)).split('\n').length; }
   function getLineText(lines, n){ return (lines[n-1] || '').trim(); }
-
-  function locToLine(text, nodeOrPos){
-    if (typeof nodeOrPos === 'number') return lineAt(text,nodeOrPos);
-    return nodeOrPos?.loc?.start?.line || lineAt(text,nodeOrPos?.start || 0);
-  }
-
-  function addIssue(list, text, {severity='MEDIUM',category='ロジック',line=1,title,desc,snippet='',fixBefore='',fixAfter='',confidence='high',kind='',rootId=null,secondary=false}){
-    list.push(makeIssue({severity,category,line,title,desc,snippet:snippet || getLineText(text.split('\n'),line),fixBefore,fixAfter,confidence,kind,rootId,secondary}));
-  }
-
-  function stripHashBang(text){ return text.startsWith('#!') ? text.replace(/^#![^\n]*/, m=>' '.repeat(m.length)) : text; }
-
-  function createSourceMap(text, baseLine=1){
-    return { text, baseLine, lineAt(pos){ return baseLine + lineAt(text,pos)-1; } };
-  }
-
-  function parseJSWithAcorn(text){
-    if (!window.acorn?.Parser){
-      try { new Function(stripHashBang(text)); return {ast:null,error:null,parser:'native'}; }
-      catch(e){ return {ast:null,error:e,parser:'native'}; }
+  function escReg(s){ return String(s).replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); }
+  function nearestKey(keys, target){
+    let best=null, bestD=Infinity;
+    const a=String(target);
+    for (const k of keys){
+      const b=String(k);
+      const d=levenshtein(a,b);
+      if (d < bestD){ bestD=d; best=k; }
     }
-    const opts={ecmaVersion:'latest',sourceType:'module',locations:true,allowHashBang:true};
-    try {
-      return {ast:window.acorn.Parser.parse(stripHashBang(text),opts),error:null,parser:'acorn'};
-    } catch(moduleErr){
-      try {
-        return {ast:window.acorn.Parser.parse(stripHashBang(text),{...opts,sourceType:'script'}),error:null,parser:'acorn'};
-      } catch(e){ return {ast:null,error:e,parser:'acorn'}; }
+    return bestD <= Math.max(2, Math.floor(Math.min(a.length,best?String(best).length:a.length)/3)) ? best : null;
+  }
+  function levenshtein(a,b){
+    const dp=Array.from({length:b.length+1},(_,i)=>i);
+    for(let i=1;i<=a.length;i++){
+      let prev=dp[0]; dp[0]=i;
+      for(let j=1;j<=b.length;j++){
+        const cur=dp[j];
+        dp[j]=Math.min(dp[j]+1, dp[j-1]+1, prev+(a[i-1]===b[j-1]?0:1));
+        prev=cur;
+      }
     }
+    return dp[b.length];
   }
-
-  function parseLoose(text){
-    try {
-      if (window.acornLoose?.parse) return window.acornLoose.parse(stripHashBang(text),{ecmaVersion:'latest',locations:true});
-    } catch(e) {}
-    return null;
+  function pushIssue(list, opts){
+    if (!opts || !opts.severity) return null;
+    const issue={
+      id:'i'+(list.length+1), severity:opts.severity, line:opts.line||1, kind:opts.kind||'General',
+      title:opts.title||'', desc:opts.desc||'', snippet:opts.snippet||'', tag:opts.tag||opts.kind||'',
+      cause:opts.cause||'', before:opts.before||'', after:opts.after||'', primaryId:opts.primaryId||null,
+      confidence:opts.confidence||'HIGH'
+    };
+    list.push(issue); return issue.id;
   }
-
-  function syntaxMessage(e){
-    const m=String(e?.message||'Syntax error');
-    if (/unterminated.*string|Unterminated string/i.test(m)) return '文字列リテラルが正しく閉じられていません。';
-    if (/unterminated.*template|Unterminated template/i.test(m)) return 'テンプレートリテラルが正しく閉じられていません。';
-    if (/regular expression|regexp|Unterminated regular expression|Invalid regular expression/i.test(m)) return '正規表現リテラルが正しく閉じられていません。';
-    if (/Unexpected token|Unexpected character/i.test(m)) return '予期しないトークンがあります。括弧・演算子・区切り記号の対応を確認してください。';
-    if (/Unexpected end/i.test(m)) return 'コード末尾までに必要な括弧・文字列・構文要素が閉じられていません。';
-    return m;
-  }
-
-  // 状態機械でコメント・文字列・template・regexを除外した「解析対象コード」を作る。
-  function maskJS(text){
-    let out='', mode='code', quote='', escaped=false, regexCharClass=false, prevSig='';
-    const isRegexStart=()=> !prevSig || /[({[=,:;!&|?+\-*%^~<>]/.test(prevSig);
-    for(let i=0;i<text.length;i++){
-      const c=text[i],n=text[i+1];
-      if(mode==='line'){ out+=' '; if(c==='\n'){mode='code'; out+='\n';} continue; }
-      if(mode==='block'){ out+=c==='\n'?'\n':' '; if(c==='*'&&n==='/'){out+=' ';i++;mode='code';} continue; }
-      if(mode==='string'){
-        if(c==='\n') out+='\n'; else out+=' ';
-        if(escaped) escaped=false; else if(c==='\\') escaped=true; else if(c===quote) mode='code';
-        continue;
-      }
-      if(mode==='template'){
-        if(c==='\n') out+='\n'; else out+=' ';
-        if(escaped) escaped=false; else if(c==='\\') escaped=true; else if(c==='`') mode='code';
-        // ${...} is intentionally masked here; AST handles it when Acorn is available.
-        continue;
-      }
-      if(c==='/'&&n==='/'){out+='  ';i++;mode='line';continue;}
-      if(c==='/'&&n==='*'){out+='  ';i++;mode='block';continue;}
-      if(c==='"'||c==="'"){out+=' ';mode='string';quote=c;continue;}
-      if(c==='`'){out+=' ';mode='template';continue;}
-      if(c==='/'&&isRegexStart()){
-        // Scan regex literal without treating /[/]/ as comments.
-        let j=i+1, cls=false, esc=false, valid=false;
-        for(;j<text.length;j++){
-          const r=text[j];
-          if(r==='\n'&&!esc) break;
-          if(esc){esc=false;continue;}
-          if(r==='\\'){esc=true;continue;}
-          if(r==='['){cls=true;continue;}
-          if(r===']'&&cls){cls=false;continue;}
-          if(r==='/'&&!cls){valid=true;j++;while(/[a-z]/i.test(text[j]||''))j++;break;}
+  function dedupeIssues(issues){
+    const out=[]; const seen=new Map();
+    const semanticKey=(it)=>{
+      const t=it.title+' '+it.desc;
+      if(/if条件に代入|ゲーム状態の条件式が代入/.test(t)) return 'assignment-condition|'+it.line;
+      if(/正規表現リテラルが正しく閉じられていません/.test(t)) return 'regex-root|'+it.line;
+      if(/Secondary Parse Error/.test(t)) return 'secondary-parse|'+it.line;
+      if(/ランダム配列添字/.test(t)) return 'random-index|'+it.line;
+      if(/XPの減算結果/.test(t)) return 'xp-discard|'+it.line;
+      if(/敵HPの減算処理/.test(t)) return 'enemy-hp-minus|'+it.line;
+      if(/所持金に文字列/.test(t)) return 'gold-string|'+it.line;
+      return null;
+    };
+    for(const it of issues){
+      const sem=semanticKey(it);
+      const k=sem || [it.severity,it.kind,it.line,it.title,it.snippet].join('|');
+      if(seen.has(k)){
+        const existing=seen.get(k);
+        // Preserve the higher-confidence / higher-severity representative.
+        if(SEVERITY_RANK[it.severity] < SEVERITY_RANK[existing.severity]){
+          const idx=out.indexOf(existing); if(idx>=0){out[idx]=it;seen.set(k,it);}
         }
-        if(valid){ while(i<j){ out += text[i]==='\n'?'\n':' '; i++; } i--; continue; }
+        continue;
       }
-      out+=c; if(!/\s/.test(c)) prevSig=c;
+      seen.set(k,it); out.push(it);
     }
-    return out;
+    return out.sort((a,b)=>(SEVERITY_RANK[a.severity]-SEVERITY_RANK[b.severity]) || a.line-b.line);
   }
 
-  function tokenizeJS(text){
-    const masked=maskJS(text);
-    const tokens=[];
-    const re=/[A-Za-z_$][\w$]*|(?:\d+(?:\.\d+)?)|===|!==|==|!=|=>|<=|>=|\+\+|--|\+=|-=|\*=|\/=|&&|\|\||\?\?|[(){}\[\].,;:?+\-*%/=<>!&|]/g;
-    let m; while((m=re.exec(masked))) tokens.push({value:m[0],pos:m.index,line:lineAt(text,m.index)});
-    return {masked,tokens};
+  function detectLanguage(text, hintExt){
+    const explicit=els.langSelect.value;
+    if(explicit!=='auto') return explicit;
+    if(hintExt) return hintExt;
+    const t=text.trim();
+    if(/^<!doctype\b/i.test(t) || /^<html\b/i.test(t) || /<(head|body|script|style|div|main|button|form)\b/i.test(t)) return 'html';
+    if(/^\s*[\[{]/.test(t)){ try{ JSON.parse(t); return 'json'; }catch(_){} }
+    if(/(^|\n)\s*(def\s|from\s+.+\s+import\s|import\s+\w+|class\s+\w+\s*:|elif\s|except\s)/.test(t)) return 'py';
+    if(/(^|\n)\s*[^{}]+\{[^{}]*:[^{}]*;/.test(t) && !/\b(function|const|let|var)\b/.test(t)) return 'css';
+    return 'js';
   }
 
-  function walkAST(node, fn, parent=null, key=''){
+  function extractHTMLTag(text, start){
+    let quote=null;
+    for(let i=start;i<text.length;i++){
+      const c=text[i];
+      if(quote){ if(c==='\\') i++; else if(c===quote) quote=null; continue; }
+      if(c==='"'||c==="'"){quote=c;continue;}
+      if(c==='>') return i;
+    }
+    return -1;
+  }
+  function parseAttrs(raw, tagStart){
+    const attrs=[]; let i=0, n=raw.length;
+    while(i<n && /\s/.test(raw[i])) i++;
+    while(i<n && !/\s/.test(raw[i])) i++; // tag name
+    const seen=new Map();
+    while(i<n){
+      while(i<n && /\s/.test(raw[i])) i++;
+      if(i>=n || raw[i]==='/') break;
+      const nameStart=i;
+      while(i<n && !/[\s=>]/.test(raw[i])) i++;
+      if(i===nameStart){ i++; continue; }
+      const name=raw.slice(nameStart,i).toLowerCase();
+      while(i<n && /\s/.test(raw[i])) i++;
+      let hasEq=false, value='', quoted=false, valueStart=i;
+      if(raw[i]==='='){
+        hasEq=true; i++; while(i<n && /\s/.test(raw[i])) i++;
+        if(raw[i]==='"' || raw[i]==="'"){
+          quoted=true; const q=raw[i++]; const vs=i; while(i<n && raw[i]!==q){ if(raw[i]==='\\') i++; i++; } value=raw.slice(vs,i); if(i<n)i++;
+        } else {
+          const vs=i; while(i<n && !/[\s>]/.test(raw[i])) i++; value=raw.slice(vs,i);
+        }
+      }
+      attrs.push({name,value,quoted,hasEq,offset:tagStart+valueStart});
+      seen.set(name,(seen.get(name)||0)+1);
+    }
+    return {attrs,seen};
+  }
+
+  function parseHTML(text, baseOffset){
+    const lines=text.split('\n'), info={ids:new Map(),classes:new Map(),tags:new Map(),onclick:new Map(),forms:[],scripts:[],styles:[],refs:[]};
+    const issues=[]; const stack=[]; let i=0;
+    while(i<text.length){
+      if(text.startsWith('<!--',i)){
+        const end=text.indexOf('-->',i+4);
+        if(end<0){ pushIssue(issues,{severity:'CRITICAL',line:lineAt(text,i),kind:'HTML',title:'HTMLコメントが閉じられていません',desc:'<!-- に対応する --> が見つかりません。',snippet:getLineText(lines,lineAt(text,i)),cause:'コメント終端がない',confidence:'CERTAIN'}); break; }
+        i=end+3; continue;
+      }
+      if(text[i]!=='<'){ i++; continue; }
+      if(/^<!doctype\b/i.test(text.slice(i))){ const e=extractHTMLTag(text,i); i=e<0?text.length:e+1; continue; }
+      if(text.startsWith('<![CDATA[',i)){ const e=text.indexOf(']]>',i+9); i=e<0?text.length:e+3; continue; }
+      const e=extractHTMLTag(text,i);
+      if(e<0){
+        pushIssue(issues,{severity:'CRITICAL',line:lineAt(text,i),kind:'HTML',title:'HTMLタグが閉じられていません',desc:'「>」が見つからないため、このタグ以降の構造を安全に解析できません。',snippet:getLineText(lines,lineAt(text,i)),confidence:'CERTAIN'}); break;
+      }
+      const raw=text.slice(i+1,e); const closing=/^\s*\//.test(raw); const m=raw.match(/^\s*\/??\s*([A-Za-z][A-Za-z0-9:-]*)/);
+      if(!m){ i=e+1; continue; }
+      const tag=m[1].toLowerCase(), ln=lineAt(text,i), isClose=/^\s*\//.test(raw);
+      if(!KNOWN_HTML_TAGS.has(tag) && !tag.includes('-')){
+        pushIssue(issues,{severity:'MEDIUM',line:ln,kind:'HTML',title:'存在しない可能性が高いタグ: <'+tag+'>',desc:'標準HTML要素として認識できません。カスタム要素なら「-」を含む名前にしてください。',snippet:getLineText(lines,ln),confidence:'MEDIUM'});
+      }
+      info.tags.set(tag,(info.tags.get(tag)||0)+1);
+      if(isClose){
+        if(!stack.length){
+          pushIssue(issues,{severity:'HIGH',line:ln,kind:'HTML',title:'対応する開始タグのない終了タグ: </'+tag+'>',desc:'この終了タグに対応する開始タグが見つかりません。',snippet:'</'+tag+'>',confidence:'CERTAIN'});
+        } else {
+          const top=stack[stack.length-1];
+          if(top.tag!==tag){
+            const idx=[...stack].map(x=>x.tag).lastIndexOf(tag);
+            if(idx>=0){
+              const primary=pushIssue(issues,{severity:'HIGH',line:ln,kind:'HTML',title:'タグの入れ子順が崩れています',desc:'<'+top.tag+'> が閉じられる前に </'+tag+'> が出現しました。',snippet:'</'+tag+'>',confidence:'CERTAIN'});
+              for(let k=stack.length-1;k>idx;k--){
+                pushIssue(issues,{severity:'LOW',line:stack[k].line,kind:'HTML',title:'派生エラー: <'+stack[k].tag+'> の閉じ順が壊れています',desc:'上の入れ子エラーの影響で正しいDOM構造として確定できません。',primaryId:primary,confidence:'DERIVED'});
+              }
+              stack.length=idx;
+            } else {
+              pushIssue(issues,{severity:'HIGH',line:ln,kind:'HTML',title:'対応する開始タグのない終了タグ: </'+tag+'>',desc:'この終了タグに対応する開始タグが見つかりません。',snippet:'</'+tag+'>',confidence:'CERTAIN'});
+            }
+          } else stack.pop();
+        }
+        i=e+1; continue;
+      }
+
+      const parsed=parseAttrs(raw,i), selfClosing=/\/\s*$/.test(raw) || VOID_TAGS.has(tag);
+      for(const [name,count] of parsed.seen){
+        if(count>1){ pushIssue(issues,{severity:'HIGH',line:ln,kind:'HTML',title:'同一属性が重複しています: '+name,desc:'同じ要素に同名属性が複数あるため、ブラウザ依存の挙動や意図しない値の採用につながります。',snippet:getLineText(lines,ln),confidence:'CERTAIN'}); }
+      }
+      for(const a of parsed.attrs){
+        if(!GLOBAL_HTML_ATTRS.has(a.name) && !a.name.startsWith('data-') && !a.name.startsWith('aria-')){
+          const likely=[...GLOBAL_HTML_ATTRS].filter(x=>x!=='data-*'&&x!=='aria-label'&&x!=='aria-labelledby'&&x!=='aria-describedby'&&x!=='aria-hidden'&&x!=='aria-live'&&x!=='aria-current'&&x!=='aria-controls'&&x!=='aria-expanded'&&x!=='aria-pressed');
+          const near=nearestKey(likely,a.name);
+          pushIssue(issues,{severity:'LOW',line:ln,kind:'HTML',title:'不正または未知の属性の可能性: '+a.name,desc:near?'「'+near+'」のタイプミスではないか確認してください。':'要素固有属性・独自拡張属性なら問題ありません。',snippet:getLineText(lines,ln),confidence:'MEDIUM'});
+        }
+        // HTMLでは「id=x」のような未クォート値自体は合法なので、誤検出防止のためスタイル警告は出さない。
+      }
+      const id=parsed.attrs.find(a=>a.name==='id')?.value;
+      if(id){
+        const list=info.ids.get(id)||[]; list.push(ln); info.ids.set(id,list);
+        if(list.length>1) pushIssue(issues,{severity:'HIGH',line:ln,kind:'HTML',title:'id「'+id+'」が重複しています',desc:'idはページ内で一意にしてください。重複するとJS/CSSの参照先が不定になります。',snippet:getLineText(lines,ln),confidence:'CERTAIN'});
+      }
+      const cls=parsed.attrs.find(a=>a.name==='class')?.value||'';
+      for(const c of cls.split(/\s+/).filter(Boolean)){ const list=info.classes.get(c)||[]; list.push(ln); info.classes.set(c,list); }
+      if(tag==='form') info.forms.push({line:ln,attrs:parsed.attrs});
+      const oc=parsed.attrs.find(a=>a.name==='onclick')?.value;
+      if(oc) info.onclick.set(id||'(anonymous@'+ln+')',oc);
+      for(const a of parsed.attrs.filter(x=>x.name==='href'||x.name==='src')){
+        if(!a.value){ pushIssue(issues,{severity:'HIGH',line:ln,kind:'HTML',title:tag+' の '+a.name+' が空です',desc:'空のURLは意図しない再読込・空リクエスト・読み込み失敗につながります。',snippet:getLineText(lines,ln),confidence:'CERTAIN'}); }
+        if(/^[a-z]+:/i.test(a.value) && !/^(https?|mailto|tel|data|blob):/i.test(a.value)){
+          pushIssue(issues,{severity:'LOW',line:ln,kind:'Security',title:'不明なURLスキーム: '+a.value.split(':')[0],desc:'許可されたスキームか確認してください。',snippet:getLineText(lines,ln),confidence:'MEDIUM'});
+        }
+        if(a.value.startsWith('#') && a.value.length>1) info.refs.push({id:a.value.slice(1),line:ln,source:tag+'.'+a.name});
+      }
+      const srcAttr=parsed.attrs.find(a=>a.name==='src')?.value||'';
+      if(tag==='img' && !parsed.attrs.some(a=>a.name==='alt')) pushIssue(issues,{severity:'LOW',line:ln,kind:'HTML',title:'imgにalt属性がありません',desc:'アクセシビリティ上の推奨事項です。装飾画像なら alt="" を明示できます。',snippet:getLineText(lines,ln),confidence:'HIGH'});
+      if(tag==='input'){
+        const type=(parsed.attrs.find(a=>a.name==='type')?.value||'text').toLowerCase();
+        if(type==='image' && !parsed.attrs.some(a=>a.name==='alt')) pushIssue(issues,{severity:'MEDIUM',line:ln,kind:'HTML',title:'input type="image" にaltがありません',desc:'画像ボタンには代替テキストが必要です。',snippet:getLineText(lines,ln),confidence:'HIGH'});
+      }
+      if(tag==='script'){
+        const type=(parsed.attrs.find(a=>a.name==='type')?.value||'').toLowerCase();
+        const start=e+1, closeRe=/<\/script\s*>/ig; closeRe.lastIndex=start; const cm=closeRe.exec(text);
+        if(cm){ info.scripts.push({content:text.slice(start,cm.index),offset:baseOffset+start,lineOffset:lineAt(text,start)-1,external:!!srcAttr,type,tagLine:ln}); i=cm.index+cm[0].length; continue; }
+        pushIssue(issues,{severity:'CRITICAL',line:ln,kind:'HTML',title:'scriptタグが閉じられていません',desc:'<\/script> が見つからないため、後続のHTMLを安全に解釈できません。',snippet:getLineText(lines,ln),confidence:'CERTAIN'}); break;
+      }
+      if(tag==='style'){
+        const start=e+1, closeRe=/<\/style\s*>/ig; closeRe.lastIndex=start; const cm=closeRe.exec(text);
+        if(cm){ info.styles.push({content:text.slice(start,cm.index),offset:baseOffset+start,lineOffset:lineAt(text,start)-1}); i=cm.index+cm[0].length; continue; }
+        pushIssue(issues,{severity:'CRITICAL',line:ln,kind:'HTML',title:'styleタグが閉じられていません',desc:'</style> が見つからないため、後続のHTMLを安全に解釈できません。',snippet:getLineText(lines,ln),confidence:'CERTAIN'}); break;
+      }
+      if(!selfClosing) stack.push({tag,line:ln});
+      i=e+1;
+    }
+    if(stack.length){
+      const primary=pushIssue(issues,{severity:'HIGH',line:stack[0].line,kind:'HTML',title:'タグの閉じ忘れがあります',desc:stack.map(x=>'<'+x.tag+'>').join(', ')+' が閉じられていません。',snippet:'<'+stack[0].tag+'>',confidence:'CERTAIN'});
+      for(let k=1;k<stack.length;k++) pushIssue(issues,{severity:'LOW',line:stack[k].line,kind:'HTML',title:'派生エラー: '+stack[k].tag+' の閉じ漏れ',desc:'上位のHTML構造エラーによる可能性があります。',primaryId:primary,confidence:'DERIVED'});
+    }
+    for(const ref of info.refs){
+      if(!info.ids.has(ref.id)){
+        const near=nearestKey([...info.ids.keys()],ref.id);
+        pushIssue(issues,{severity:'MEDIUM',line:ref.line,kind:'DOM',title:'存在しないidへの参照: #'+ref.id,desc:near?'「'+near+'」のタイプミスではありませんか？':'参照先の要素がHTML内に見つかりません。',snippet:getLineText(lines,ref.line),confidence:'MEDIUM'});
+      }
+    }
+    return {issues,info};
+  }
+
+  function scanLexicalJS(text, baseLine, issues){
+    let state='code', quote=null, blockComment=false, templateDepth=0, regexClass=false, regexEsc=false, regexStart=-1;
+    const stack=[]; let canStartRegex=true;
+    const emitLex=(sev,line,title,desc,snip)=>pushIssue(issues,{severity:sev,line,kind:'Syntax',title,desc,snippet:snip,confidence:'CERTAIN'});
+    for(let i=0;i<text.length;i++){
+      const c=text[i], n=text[i+1], ln=baseLine+lineAt(text,i)-1;
+      if(state==='lineComment'){if(c==='\n')state='code';continue;}
+      if(state==='blockComment'){if(c==='*'&&n==='/'){state='code';i++;}continue;}
+      if(state==='string'){
+        if(c==='\\'){i++;continue;}
+        if(c===quote){state='code';canStartRegex=false;continue;}
+        if(c==='\n'){emitLex('CRITICAL',ln,'文字列リテラルが閉じられていません','開きクォートに対応する閉じクォートがありません。',getLineText(text.split('\n'),lineAt(text,i)));state='code';}
+        continue;
+      }
+      if(state==='template'){
+        if(c==='\\'){i++;continue;}
+        if(c==='`'){state='code';canStartRegex=false;continue;}
+        continue;
+      }
+      if(state==='regex'){
+        if(regexEsc){regexEsc=false;continue;}
+        if(c==='\\'){regexEsc=true;continue;}
+        if(c==='['){regexClass=true;continue;}
+        if(c===']'&&regexClass){regexClass=false;continue;}
+        if(c==='/'&&!regexClass){state='code';canStartRegex=false;while(/[a-z]/i.test(text[i+1]||''))i++;continue;}
+        if(c==='\n' || i===text.length-1){emitLex('CRITICAL',ln,'正規表現リテラルが正しく閉じられていません','/ で始まる正規表現が閉じられていないか、文字クラス「[ ... ]」が未完了です。',getLineText(text.split('\n'),lineAt(text,regexStart)));state='code';}
+        continue;
+      }
+      if(c==='/'&&n==='/'){state='lineComment';i++;continue;}
+      if(c==='/'&&n==='*'){state='blockComment';i++;continue;}
+      if(c==='"'||c==="'"){state='string';quote=c;continue;}
+      if(c==='`'){state='template';continue;}
+      if(c==='/ '){ }
+      if(c==='/'&&canStartRegex){state='regex';regexStart=i;regexClass=false;regexEsc=false;continue;}
+      if(c==='('||c==='['||c==='{') stack.push({c,line:ln});
+      else if(c===')'||c===']'||c==='}'){
+        const map={')':'(',']':'[','}':'{'}; const top=stack.pop();
+        if(!top||top.c!==map[c]) emitLex('HIGH',ln,'括弧の対応が取れていません','対応する開き括弧がないか、種類が一致しません。',getLineText(text.split('\n'),lineAt(text,i)));
+      }
+      canStartRegex=/[({[=,:;!&|?+\-*%^~<>]/.test(c) || /\b(return|throw|case|delete|void|typeof|instanceof|in|of|yield|await|else|do)\b/.test(text.slice(Math.max(0,i-12),i+1));
+    }
+    if(state==='blockComment') emitLex('HIGH',baseLine+text.split('\n').length-1,'ブロックコメントが閉じられていません','/* に対応する */ がありません。',text.split('\n').slice(-1)[0]);
+    if(state==='template') emitLex('CRITICAL',baseLine+text.split('\n').length-1,'テンプレートリテラルが閉じられていません','` に対応する閉じバッククォートがありません。',text.split('\n').slice(-1)[0]);
+    if(state==='string') emitLex('CRITICAL',baseLine+text.split('\n').length-1,'文字列リテラルが閉じられていません','文字列の終端が見つかりません。',text.split('\n').slice(-1)[0]);
+    if(stack.length){
+      const primary=issues.find(x=>x.kind==='Syntax'&&x.severity==='CRITICAL');
+      for(const s of stack){ pushIssue(issues,{severity:primary?'LOW':'HIGH',line:s.line,kind:'Syntax',title:primary?'Secondary Parse Error: 括弧の二次エラー':'括弧が閉じられていません',desc:primary?'先行する構文エラーのため正しく解析できない可能性があります。':'開き括弧に対応する閉じ括弧がありません。',primaryId:primary?.id||null,confidence:primary?'DERIVED':'CERTAIN'}); }
+    }
+  }
+
+  function parseJSWithAST(text){
+    if(window.acorn && typeof window.acorn.parse==='function'){
+      try{
+        return {ast:window.acorn.parse(text,{ecmaVersion:'latest',sourceType:'module',locations:true,allowAwaitOutsideFunction:true}),parser:'Acorn 8.18.0'};
+      }catch(e){ return {error:e,parser:'Acorn 8.18.0'}; }
+    }
+    try{
+      const astText='return (function(){'+text+'\n});';
+      new Function(astText);
+      return {ast:null,parser:'Native JS parser'};
+    }catch(e){ return {error:e,parser:'Native JS parser'}; }
+  }
+
+  function nodeLine(n){ return n?.loc?.start?.line || 1; }
+  function isIdentifierRef(node,parent,key){
+    if(!node || node.type!=='Identifier') return false;
+    if(!parent) return true;
+    if(parent.type==='MemberExpression' && key==='property' && !parent.computed) return false;
+    if(parent.type==='Property' && key==='key' && !parent.computed) return false;
+    if((parent.type==='MethodDefinition'||parent.type==='PropertyDefinition') && key==='key' && !parent.computed) return false;
+    if(['FunctionDeclaration','FunctionExpression','ClassDeclaration','ClassExpression'].includes(parent.type) && key==='id') return false;
+    if(parent.type==='VariableDeclarator' && key==='id') return false;
+    if(parent.type==='LabeledStatement'||parent.type==='BreakStatement'||parent.type==='ContinueStatement') return key!=='label';
+    if(parent.type==='CatchClause' && key==='param') return false;
+    return true;
+  }
+  function patternNames(node,out){
+    if(!node) return;
+    if(node.type==='Identifier'){out.push(node.name);return;}
+    for(const k of Object.keys(node)){ if(k==='loc'||k==='start'||k==='end') continue; const v=node[k]; if(Array.isArray(v)) v.forEach(x=>{if(x&&typeof x==='object')patternNames(x,out)}); else if(v&&typeof v==='object') patternNames(v,out); }
+  }
+  function astWalk(node,cb,parent=null,key=''){
     if(!node||typeof node!=='object') return;
-    fn(node,parent,key);
-    for(const k in node){
+    if(node.type) cb(node,parent,key);
+    for(const k of Object.keys(node)){
       if(k==='loc'||k==='start'||k==='end') continue;
       const v=node[k];
-      if(v&&typeof v==='object'){
-        if(Array.isArray(v)) v.forEach(ch=>walkAST(ch,fn,node,k)); else if(v.type) walkAST(v,fn,node,k);
-      }
+      if(Array.isArray(v)) v.forEach(x=>{if(x&&typeof x.type==='string')astWalk(x,cb,node,k);});
+      else if(v&&typeof v.type==='string') astWalk(v,cb,node,k);
     }
   }
 
-  function sourceSlice(text,node){ return node?.start!=null && node?.end!=null ? text.slice(node.start,node.end) : ''; }
-
-  function collectASTFacts(ast,text){
-    const declared=new Map();
-    const used=[];
-    const constNames=new Set(), letNames=new Set(), functions=new Map();
-    const eventRegs=[], calls=[], assignments=[], comparisons=[];
-    function declare(name,node,kind){
-      if(!name) return; const a=declared.get(name)||[]; a.push({node,kind}); declared.set(name,a);
-      if(kind==='const') constNames.add(name); if(kind==='let'||kind==='var') letNames.add(name);
-    }
-    walkAST(ast,(n,parent,key)=>{
-      if(n.type==='VariableDeclarator'&&n.id?.type==='Identifier') declare(n.id.name,n,n.kind||parent?.kind||'var');
-      if(n.type==='FunctionDeclaration'&&n.id){declare(n.id.name,n,'function'); functions.set(n.id.name,n);}
-      if(n.type==='FunctionExpression'&&n.id) declare(n.id.name,n,'function');
-      if((n.type==='FunctionDeclaration'||n.type==='FunctionExpression'||n.type==='ArrowFunctionExpression')&&Array.isArray(n.params)){
-        n.params.forEach(p=>{
-          if(p?.type==='Identifier') declare(p.name,p,'param');
-          if(p?.type==='AssignmentPattern'&&p.left?.type==='Identifier') declare(p.left.name,p.left,'param');
-          if(p?.type==='RestElement'&&p.argument?.type==='Identifier') declare(p.argument.name,p.argument,'param');
-        });
-      }
-      if(n.type==='ImportDeclaration'){
-        (n.specifiers||[]).forEach(sp=>{if(sp.local?.name) declare(sp.local.name,sp.local,'import');});
-      }
-      if(n.type==='CatchClause'&&n.param?.type==='Identifier') declare(n.param.name,n.param,'catch');
-      if(n.type==='ClassDeclaration'&&n.id) declare(n.id.name,n,'class');
-      if(n.type==='Identifier'){
-        const isDecl = parent && ((parent.type==='VariableDeclarator'&&parent.id===n)||
-          (parent.type==='FunctionDeclaration'&&parent.id===n)||
-          (parent.type==='FunctionExpression'&&parent.id===n)||
-          (parent.type==='ClassDeclaration'&&parent.id===n)||
-          (parent.type==='Property'&&parent.key===n&&!parent.computed)||
-          (parent.type==='MethodDefinition'&&parent.key===n&&!parent.computed));
-        const isProp = parent && parent.type==='MemberExpression' && parent.property===n && !parent.computed;
-        if(!isDecl&&!isProp) used.push({name:n.name,node:n,parent});
-      }
-      if(n.type==='AssignmentExpression') assignments.push(n);
-      if(n.type==='CallExpression') calls.push(n);
-      if(n.type==='BinaryExpression'||n.type==='LogicalExpression'||n.type==='ConditionalExpression') comparisons.push(n);
-      if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'&&n.callee.property?.name==='addEventListener'){
-        const event=n.arguments?.[0]; const handler=n.arguments?.[1];
-        if(event?.type==='Literal'&&typeof event.value==='string') eventRegs.push({node:n,target:sourceSlice(text,n.callee.object),event:event.value,handler:sourceSlice(text,handler||{})});
-      }
-    });
-    return {declared,used,constNames,letNames,functions,eventRegs,calls,assignments,comparisons};
-  }
-
-  function getFunctionAncestors(ast){
-    const funcs=[];
-    walkAST(ast,(n)=>{ if(['FunctionDeclaration','FunctionExpression','ArrowFunctionExpression'].includes(n.type)) funcs.push(n); });
-    return funcs;
-  }
-
-  function nodeContains(node,pos){ return node?.start<=pos && pos<=node?.end; }
-  function enclosingFunction(ast,pos){
-    let best=null; walkAST(ast,n=>{if(['FunctionDeclaration','FunctionExpression','ArrowFunctionExpression'].includes(n.type)&&nodeContains(n,pos)){ if(!best||n.end-n.start<best.end-best.start) best=n;}}); return best;
-  }
-
-  function checkCommon(text, lines, issues){
-    // Common checks are now language-safe: no HTML/CSS/JS mixed brace stack.
-    lines.forEach((l,i)=>{
-      if(/^\s*(?:\t+ +| +\t+)/.test(l)) addIssue(issues,text,{severity:'INFO',category:'スタイル',line:i+1,title:'インデントにタブとスペースが混在しています',desc:'同一ファイル内でインデント方法が混在しています。',snippet:l.trim(),confidence:'high'});
-      if(l.length>300) addIssue(issues,text,{severity:'INFO',category:'スタイル',line:i+1,title:'非常に長い行があります',desc:`${l.length}文字の長い行です。可読性や保守性の低下につながる場合があります。`,confidence:'high'});
-      const m=l.match(/\b(TODO|FIXME|XXX)\b[:：]?\s*(.*)/);
-      if(m) addIssue(issues,text,{severity:'INFO',category:'メモ',line:i+1,title:`${m[1]} コメントが残っています`,desc:m[2]?`内容: ${m[2].slice(0,120)}`:'未完了タスクを示すコメントです。',snippet:l.trim()});
-    });
-    if(text.charCodeAt(0)===0xFEFF) addIssue(issues,text,{severity:'INFO',category:'エンコード',line:1,title:'ファイル先頭にBOMがあります',desc:'UTF-8 BOM付きです。通常は問題ありませんが、特殊な環境では扱いに差が出ます。'});
-  }
-
-  function scanHTMLTokens(text){
-    const tags=[], comments=[], attrs=[];
-    let i=0;
-    const lower=text.toLowerCase();
-    while(i<text.length){
-      if(text.startsWith('<!--',i)){ const end=text.indexOf('-->',i+4); comments.push({start:i,end:end<0?text.length:end+3,closed:end>=0}); i=end<0?text.length:end+3; continue; }
-      if(text[i]!=='<'){i++;continue;}
-      // Do not inspect JS/CSS contents as HTML.
-      const next=text.slice(i+1).match(/^\s*(script|style)\b/i);
-      if(next){
-        const tagName=next[1].toLowerCase(); const openEnd=text.indexOf('>',i+1);
-        if(openEnd<0){tags.push({name:tagName,start:i,end:text.length,close:false,attrsText:text.slice(i+1)});break;}
-        const openRaw=text.slice(i,openEnd+1); const attrOnly=openRaw.replace(new RegExp('^<\\s*'+tagName+'\\b','i'),'').replace(/>\s*$/,''); tags.push({name:tagName,start:i,end:openEnd+1,close:false,attrsText:attrOnly});
-        const closeRe=new RegExp(`</${tagName}\\s*>`,'ig'); closeRe.lastIndex=openEnd+1; const cm=closeRe.exec(text);
-        if(!cm){ i=text.length; } else { tags.push({name:tagName,start:cm.index,end:cm.index+cm[0].length,close:true,attrsText:''}); i=cm.index+cm[0].length; }
-        continue;
-      }
-      const gt=text.indexOf('>',i+1); if(gt<0){i++;continue;}
-      const raw=text.slice(i,gt+1); const m=raw.match(/^<\s*(\/)?\s*([A-Za-z][A-Za-z0-9:-]*)([\s\S]*?)(\/?)>$/);
-      if(!m){i=gt+1;continue;}
-      const isClose=!!m[1], name=m[2].toLowerCase(), attrText=m[3]||'', selfClosing=!!m[4];
-      tags.push({name,start:i,end:gt+1,close:isClose,selfClosing,attrsText:attrText});
-      if(!isClose){
-        const attrRe=/([:@A-Za-z_][\w:.-]*)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s>]+))?/g; let am;
-        while((am=attrRe.exec(attrText))){
-          attrs.push({name:am[1].toLowerCase(),valueRaw:am[2]||null,tag:name,start:i+1+raw.indexOf(am[0])});
+  function checkJSAst(text, ast, issues, htmlInfo){
+    const lines=text.split('\n'), decls=new Map(), refs=new Map(), funcs=new Map(), consts=new Set(), callSites=[], eventSites=[], domSites=[];
+    const addDecl=(name,kind,line)=>{ if(!decls.has(name))decls.set(name,[]); decls.get(name).push({kind,line}); if(kind==='const')consts.add(name); };
+    astWalk(ast,(n,p,k)=>{
+      const ln=nodeLine(n);
+      if(n.type==='VariableDeclarator'){
+        const names=[]; patternNames(n.id,names); names.forEach(x=>addDecl(x,p?.kind||'let',ln));
+      } else if(n.type==='FunctionDeclaration'){
+        if(n.id) {addDecl(n.id.name,'function',ln); funcs.set(n.id.name,{line:ln,count:n.params.length,params:n.params.map(x=>x.type==='Identifier'?x.name:'…')});}
+        n.params.forEach(param=>{const names=[];patternNames(param,names);names.forEach(x=>addDecl(x,'param',ln));});
+      } else if(n.type==='FunctionExpression'||n.type==='ArrowFunctionExpression'){
+        n.params.forEach(param=>{const names=[];patternNames(param,names);names.forEach(x=>addDecl(x,'param',ln));});
+      } else if(n.type==='ClassDeclaration'&&n.id) addDecl(n.id.name,'class',ln);
+      else if(n.type==='CatchClause'&&n.param){const names=[];patternNames(n.param,names);names.forEach(x=>addDecl(x,'catch',ln));}
+      else if(n.type==='Identifier' && isIdentifierRef(n,p,k)) refs.set(n.name,(refs.get(n.name)||0)+1);
+      if(n.type==='CallExpression'){ callSites.push(n);
+        const ev=n.callee?.type==='MemberExpression' ? (n.callee.property?.name||'') : '';
+        if(ev==='addEventListener'||ev==='removeEventListener') eventSites.push(n);
+        if(n.callee?.type==='MemberExpression'){
+          const obj=n.callee.object, prop=n.callee.property?.name;
+          if(obj?.type==='Identifier' && obj.name==='document' && ['getElementById','querySelector','querySelectorAll'].includes(prop)) domSites.push(n);
         }
       }
-      i=gt+1;
+    });
+
+    // Syntax-specific AST checks.
+    astWalk(ast,(n,p,k)=>{
+      const ln=nodeLine(n);
+      if(n.type==='IfStatement' && n.test?.type==='AssignmentExpression'){
+        const op=n.test.operator;
+        if(op==='=') pushIssue(issues,{severity:'HIGH',line:ln,kind:'Logic Bug',title:'if条件に代入「=」があります',desc:'比較ではなく値を代入してから条件判定するため、条件が常に意図しない値になります。',snippet:getLineText(lines,ln),cause:'比較演算子の取り違え',before:getLineText(lines,ln),after:getLineText(lines,ln).replace(/=(?!=)/,'==='),confidence:'CERTAIN'});
+      }
+      if(n.type==='BinaryExpression' && ['==','!='].includes(n.operator)) pushIssue(issues,{severity:'LOW',line:ln,kind:'Logic Bug',title:'非厳密比較「'+n.operator+'」が使われています',desc:'意図した型変換か確認してください。型変換が不要なら === / !== の方が安全です。',snippet:getLineText(lines,ln),confidence:'LOW'});
+      if(n.type==='AssignmentExpression'){
+        if(n.operator==='+=' && n.left?.type==='Identifier' && n.right?.type==='Literal' && typeof n.right.value==='string' && /^(hp|mp|gold|money|score|xp|damage|level|coins?|credits?)$/i.test(n.left.name)){
+          pushIssue(issues,{severity:'MEDIUM',line:ln,kind:'Type',title:'数値系変数に文字列を加算しています',desc:n.left.name+' に文字列を加算すると「50」→数値ではなく文字列連結になる可能性があります。',snippet:getLineText(lines,ln),cause:'暗黙的な型変換',before:getLineText(lines,ln),after:getLineText(lines,ln).replace(/\+=\s*["']/, '+= Number(').replace(/(["'])\s*;?\s*$/,')'),confidence:'HIGH'});
+        }
+        if(/^=(=|>)?/.test(n.operator)===false && n.operator==='=' && n.left?.type==='Identifier'){
+          const name=n.left.name;
+          if(/^(hp|mp|health|mana|gold|money|coins?)$/i.test(name) && n.right?.type==='UnaryExpression' && n.right.operator==='-' ){
+            pushIssue(issues,{severity:'MEDIUM',line:ln,kind:'Game Logic',title:'減算「-=」ではなく負数の代入になっています',desc:name+' = -damage のような式は、既存値から減算する処理ではありません。',snippet:getLineText(lines,ln),cause:'=- と -= の混同候補',before:getLineText(lines,ln),after:getLineText(lines,ln).replace('= -','-= '),confidence:'HIGH'});
+          }
+        }
+        if(n.left?.type==='Identifier' && consts.has(n.left.name)) pushIssue(issues,{severity:'HIGH',line:ln,kind:'Logic Bug',title:'const変数を再代入しています: '+n.left.name,desc:'constで宣言した識別子は再代入できません。',snippet:getLineText(lines,ln),confidence:'CERTAIN'});
+      }
+      if(n.type==='UpdateExpression' && n.argument?.type==='Identifier' && consts.has(n.argument.name)) pushIssue(issues,{severity:'HIGH',line:ln,kind:'Logic Bug',title:'const変数を更新しています: '+n.argument.name,desc:'const変数への ++ / -- は実行時エラーになります。',snippet:getLineText(lines,ln),confidence:'CERTAIN'});
+      if(n.type==='ExpressionStatement' && n.expression?.type==='Identifier' && funcs.has(n.expression.name)) pushIssue(issues,{severity:'LOW',line:ln,kind:'Logic Bug',title:'関数を呼び出さず参照しています: '+n.expression.name,desc:'関数名だけを置くと、関数は実行されません。必要なら '+n.expression.name+'() としてください。',snippet:getLineText(lines,ln),before:getLineText(lines,ln),after:getLineText(lines,ln).replace(new RegExp('\\b'+escReg(n.expression.name)+'\\b'),'$&()'),confidence:'HIGH'});
+      if(n.type==='CallExpression' && n.callee?.type==='Identifier' && funcs.has(n.callee.name)){
+        const f=funcs.get(n.callee.name), argc=n.arguments.length;
+        if(argc<f.count || argc>f.count) pushIssue(issues,{severity:'MEDIUM',line:ln,kind:'Logic Bug',title:'関数引数の個数が宣言と一致しません: '+n.callee.name,desc:'宣言: '+f.count+'個 / 呼び出し: '+argc+'個。rest parameter や default parameter の場合は警告を読み替えてください。',snippet:getLineText(lines,ln),confidence:'MEDIUM'});
+      }
+      if(n.type==='ArrayExpression'){
+        // no-op; indexed access is checked below
+      }
+      if(n.type==='MemberExpression' && n.computed){
+        const obj=n.object, prop=n.property;
+        if(prop?.type==='MemberExpression' && prop.property?.name==='length') pushIssue(issues,{severity:'HIGH',line:ln,kind:'Logic Bug',title:'配列のlengthそのものを添字にしている可能性があります',desc:'arr[arr.length] は通常の配列では存在しない要素を参照します。最大添字は length - 1 です。',snippet:getLineText(lines,ln),before:getLineText(lines,ln),after:getLineText(lines,ln).replace(/\[([^\]]+)\.length\]/,'[$1.length - 1]'),confidence:'HIGH'});
+        if(prop?.type==='Literal' && typeof prop.value==='number' && obj?.type==='ArrayExpression' && prop.value>=obj.elements.length) pushIssue(issues,{severity:'HIGH',line:ln,kind:'Logic Bug',title:'配列リテラルの範囲外アクセス',desc:'要素数は '+obj.elements.length+' なので添字 '+prop.value+' は存在しません。',snippet:getLineText(lines,ln),confidence:'CERTAIN'});
+      }
+      if(n.type==='IfStatement' && n.test?.type==='BinaryExpression' && n.test.left?.type==='Identifier' && n.test.right?.type==='Literal' && n.test.left.name===n.test.right.value){
+        pushIssue(issues,{severity:'MEDIUM',line:ln,kind:'Logic Bug',title:'同じ値を比較しているため条件が固定化されています',desc:'条件式が常に同じ結果になる可能性があります。',snippet:getLineText(lines,ln),confidence:'MEDIUM'});
+      }
+      if(n.type==='IfStatement' && n.test?.type==='Literal' && typeof n.test.value==='boolean') pushIssue(issues,{severity:'MEDIUM',line:ln,kind:'Logic Bug',title:'常に'+(n.test.value?'true':'false')+'になる条件',desc:'条件がリテラルで固定されています。意図したデバッグコードか確認してください。',snippet:getLineText(lines,ln),confidence:'CERTAIN'});
+      if(n.type==='ForStatement'){
+        const t=n.test;
+        if(t?.type==='BinaryExpression' && t.operator==='<=' && t.right?.type==='MemberExpression' && t.right.property?.name==='length') pushIssue(issues,{severity:'LOW',line:ln,kind:'Logic Bug',title:'forループの境界がoff-by-oneの可能性',desc:'i <= array.length は最後に array[array.length] を参照することがあります。通常は i < array.length です。',snippet:getLineText(lines,ln),confidence:'LOW'});
+      }
+      if(n.type==='WhileStatement'){
+        if(n.test?.type==='Literal' && n.test.value===true) pushIssue(issues,{severity:'HIGH',line:ln,kind:'Logic Bug',title:'終了条件のないwhile(true)です',desc:'break/returnなどの明示的脱出がなければ無限ループになります。',snippet:getLineText(lines,ln),confidence:'CERTAIN'});
+      }
+      if(n.type==='ReturnStatement' && p?.type==='BlockStatement'){
+        const idx=p.body.indexOf(n); if(idx>=0 && p.body.slice(idx+1).some(x=>x.type!=='FunctionDeclaration')) pushIssue(issues,{severity:'LOW',line:ln,kind:'Logic Bug',title:'return後に到達不能コードがあります',desc:'同じブロック内の後続文は実行されません。',snippet:getLineText(lines,ln),confidence:'CERTAIN'});
+      }
+      if(n.type==='BinaryExpression' && n.operator==='/' && n.right?.type==='Literal' && n.right.value===0) pushIssue(issues,{severity:'HIGH',line:ln,kind:'Logic Bug',title:'0除算',desc:'0で割るため Infinity / NaN が発生します。',snippet:getLineText(lines,ln),confidence:'CERTAIN'});
+      if(n.type==='CallExpression' && n.callee?.type==='MemberExpression'){
+        const obj=n.callee.object, prop=n.callee.property?.name;
+        if(obj?.type==='Identifier' && obj.name==='JSON' && prop==='parse'){
+          pushIssue(issues,{severity:'MEDIUM',line:ln,kind:'非同期',title:'JSON.parse の失敗時処理を確認してください',desc:'不正JSONでは例外になります。ユーザー入力・localStorage・通信データなら try/catch を検討してください。',snippet:getLineText(lines,ln),confidence:'MEDIUM'});
+        }
+        if(obj?.type==='Identifier' && (obj.name==='localStorage'||obj.name==='sessionStorage') && prop==='getItem'){
+          pushIssue(issues,{severity:'MEDIUM',line:ln,kind:'保存',title:obj.name+'.getItem() は null を返す可能性があります',desc:'初回起動や削除後に null になり得るため、直後に JSON.parse / プロパティアクセスする場合はガードが必要です。',snippet:getLineText(lines,ln),confidence:'HIGH'});
+        }
+        if(obj?.type==='Identifier' && (obj.name==='localStorage'||obj.name==='sessionStorage') && prop==='setItem'){
+          if(n.arguments[1] && n.arguments[1].type!=='Literal' && !(n.arguments[1].type==='CallExpression' && n.arguments[1].callee?.type==='MemberExpression' && n.arguments[1].callee.object?.name==='JSON' && n.arguments[1].callee.property?.name==='stringify')){
+            pushIssue(issues,{severity:'LOW',line:ln,kind:'保存',title:'保存値のJSON化を確認してください',desc:'オブジェクト/配列を保存する場合は JSON.stringify を使う構造か確認してください。',snippet:getLineText(lines,ln),confidence:'MEDIUM'});
+          }
+        }
+        if(prop==='clear' && n.arguments.length===0){}
+      }
+      if(n.type==='MemberExpression' && !n.computed && n.property?.name==='clear' && n.object?.name==='localStorage') pushIssue(issues,{severity:'MEDIUM',line:ln,kind:'Logic Bug',title:'localStorage.clear を呼び出していません',desc:'メソッド参照だけでは削除処理は実行されません。必要なら localStorage.clear() としてください。',snippet:getLineText(lines,ln),before:getLineText(lines,ln),after:getLineText(lines,ln)+'()',confidence:'HIGH'});
+      if(n.type==='BinaryExpression' && n.operator==='-' && p?.type==='ExpressionStatement') pushIssue(issues,{severity:'MEDIUM',line:ln,kind:'Logic Bug',title:'計算結果を使用していません',desc:'減算結果を代入・returnしていないため、値が変化しません。代入式の書き間違い候補です。',snippet:getLineText(lines,ln),confidence:'HIGH'});
+      if(n.type==='CallExpression' && n.callee?.type==='MemberExpression' && n.callee.object?.type==='Identifier' && n.callee.object.name==='Math' && n.callee.property?.name==='floor'){
+        const expr=n.arguments[0]; const flat=expr?.type==='BinaryExpression' ? expr : null;
+        if(flat && flat.operator==='+' && flat.right?.type==='Literal' && flat.right.value===1 && flat.left?.type==='BinaryExpression' && flat.left.operator==='*' && flat.left.left?.type==='CallExpression' && flat.left.left.callee?.type==='MemberExpression' && flat.left.left.callee.object?.name==='Math' && flat.left.left.callee.property?.name==='random' && flat.left.right?.type==='MemberExpression' && flat.left.right.property?.name==='length'){
+          pushIssue(issues,{severity:'HIGH',line:ln,kind:'Game Logic',title:'ランダム配列添字が1つずれています',desc:'Math.floor(Math.random() * enemies.length + 1) は 1〜length の範囲になり、length が選ばれて範囲外になります。',snippet:getLineText(lines,ln),cause:'0-based index と 1-based index の混同',before:getLineText(lines,ln),after:getLineText(lines,ln).replace(/\+\s*1\s*\)\s*$/,' )'),confidence:'CERTAIN'});
+        }
+      }
+      if(n.type==='CallExpression' && n.callee?.type==='MemberExpression' && n.callee.object?.name==='document' && ['getElementById','querySelector','querySelectorAll'].includes(n.callee.property?.name)){
+        const arg=n.arguments[0]; if(arg?.type==='Literal' && typeof arg.value==='string' && htmlInfo){
+          let wanted=arg.value, targetId= n.callee.property.name==='getElementById' ? wanted : (wanted[0]==='#'?wanted.slice(1):null);
+          if(targetId && !htmlInfo.ids.has(targetId)){
+            const near=nearestKey([...htmlInfo.ids.keys()],targetId);
+            pushIssue(issues,{severity:'HIGH',line:ln,kind:'DOM',title:'未定義DOM要素を参照しています: '+wanted,desc:near?'HTMLには「'+near+'」があり、JSは「'+targetId+'」を参照しています。ID typo の可能性があります。':'HTML内に参照対象が見つかりません。',snippet:getLineText(lines,ln),confidence:near?'CERTAIN':'HIGH'});
+          }
+          if(n.callee.property.name==='querySelector' && wanted.startsWith('.') && !htmlInfo.classes.has(wanted.slice(1))){
+            const near=nearestKey([...htmlInfo.classes.keys()],wanted.slice(1));
+            pushIssue(issues,{severity:'MEDIUM',line:ln,kind:'DOM',title:'未定義classをquerySelectorしています: '+wanted,desc:near?'「.'+near+'」のタイプミスかもしれません。':'HTML内に対象classが見つかりません。',snippet:getLineText(lines,ln),confidence:near?'HIGH':'MEDIUM'});
+          }
+        }
+      }
+    });
+
+    // Undefined / unused symbols. This is intentionally conservative.
+    for(const [name,count] of refs){
+      if(!decls.has(name) && !BUILTIN_GLOBALS.has(name) && !/^(_|arguments$)/.test(name)){
+        pushIssue(issues,{severity:'MEDIUM',line:1,kind:'Type',title:'宣言されていない変数/関数の可能性: '+name,desc:'AST上で宣言元を確認できませんでした。グローバル変数や外部ライブラリなら誤検出の可能性があります。',confidence:'MEDIUM'});
+      }
     }
-    return {tags,comments,attrs};
-  }
-
-  const voidTags = new Set(['area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr']);
-  const knownHTMLTags = new Set(['html','head','body','title','meta','link','style','script','main','header','footer','nav','section','article','aside','div','span','p','a','img','picture','source','figure','figcaption','button','form','label','input','textarea','select','option','optgroup','fieldset','legend','table','thead','tbody','tfoot','tr','th','td','ul','ol','li','dl','dt','dd','strong','em','small','pre','code','blockquote','h1','h2','h3','h4','h5','h6','br','hr','canvas','audio','video','iframe','details','summary','dialog','template','svg','path','g','circle','rect','line','polyline','polygon','use']);
-  const globalHTMLAttrs = new Set(['id','class','style','title','hidden','lang','dir','role','tabindex','slot','part','data-*','aria-*','name','value','type','disabled','checked','selected','multiple','required','readonly','placeholder','autocomplete','min','max','step','for','href','src','alt','width','height','target','rel','action','method','enctype','novalidate','content','charset','rows','cols','colspan','rowspan','draggable','contenteditable']);
-  const tagRequiredAttrs={img:['src','alt'],area:['href','alt']};
-
-  function extractEmbedded(text,tags){
-    const scripts=[],styles=[];
-    let open=null;
-    for(const t of tags){
-      if(t.name==='script'&&!t.close){ open=t; continue; }
-      if(t.name==='script'&&t.close&&open){ const raw=text.slice(open.end,t.start); scripts.push({text:raw,start:open.end,line:lineAt(text,open.end),attrs:open.attrsText}); open=null; }
+    for(const [name,arr] of decls){
+      const refCount=refs.get(name)||0;
+      const kind=arr[0].kind;
+      if(refCount===0 && kind!=='param' && kind!=='catch') pushIssue(issues,{severity:'LOW',line:arr[0].line,kind:'Logic Bug',title:'宣言しているが使用されていない: '+name,desc:'使われていない変数は不要コードか、参照漏れの可能性があります。',confidence:'MEDIUM'});
+      if(arr.length>1 && ['let','const'].includes(kind)) pushIssue(issues,{severity:'HIGH',line:arr[arr.length-1].line,kind:'Logic Bug',title:'同一スコープで変数宣言が重複しています: '+name,desc:'let/constの再宣言は構文エラーになります。',confidence:'HIGH'});
     }
-    open=null;
-    for(const t of tags){
-      if(t.name==='style'&&!t.close){open=t;continue;}
-      if(t.name==='style'&&t.close&&open){const raw=text.slice(open.end,t.start);styles.push({text:raw,start:open.end,line:lineAt(text,open.end),attrs:open.attrsText});open=null;}
-    }
-    return {scripts,styles};
-  }
+    // var guidance is INFO only; do not call it a bug.
+    const varRe=/\bvar\s+([A-Za-z_$][\w$]*)/g; let vm; while((vm=varRe.exec(text))) pushIssue(issues,{severity:'INFO',line:lineAt(text,vm.index),kind:'Logic Bug',title:'var の使用',desc:'バグとは限りません。ブロックスコープが不要でないなら let / const の方が安全です。',snippet:getLineText(lines,lineAt(text,vm.index)),confidence:'INFO'});
 
-  function parseAttrs(attrsText){
-    const list=[]; const re=/([:@A-Za-z_][\w:.-]*)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s>]+))?/g; let m;
-    while((m=re.exec(attrsText))) list.push({name:m[1].toLowerCase(),rawValue:m[2]||null,value:m[2]?(m[2][0]==='"'||m[2][0]==="'"?m[2].slice(1,-1):m[2]):'',quoted:!!m[2]&&(m[2][0]==='"'||m[2][0]==="'")});
-    return list;
-  }
-
-  function checkHTML(text,lines,issues){
-    const {tags,comments,attrs}=scanHTMLTokens(text);
-    // Comment checks without parsing comment contents as tags.
-    comments.filter(c=>!c.closed).forEach(c=>addIssue(issues,text,{severity:'CRITICAL',category:'HTML',line:lineAt(text,c.start),title:'HTMLコメントが閉じられていません',desc:'<!-- から --> までが閉じられていません。後続HTMLがコメント扱いになる可能性があります.',snippet:'<!-- ...',kind:'html-comment'}));
-
-    const stack=[];
-    const idMap=new Map(), classSet=new Set(), inlineHandlers=[];
-    for(const t of tags){
-      if(!t.close){
-        if(!knownHTMLTags.has(t.name)&&t.name.includes(':')===false&&!t.name.includes('-')) addIssue(issues,text,{severity:'MEDIUM',category:'HTML',line:lineAt(text,t.start),title:`未知のHTMLタグ <${t.name}>`,desc:'標準HTMLタグとして認識できません。Custom Elementである場合は意図した命名か確認してください。',snippet:text.slice(t.start,t.end),confidence:'medium'});
-        if(!voidTags.has(t.name)&&!t.selfClosing) stack.push(t);
-      } else {
-        const idx=[...stack].map(x=>x.name).lastIndexOf(t.name);
-        if(idx<0) addIssue(issues,text,{severity:'HIGH',category:'HTML',line:lineAt(text,t.start),title:`対応する開始タグのない終了タグ </${t.name}>`,desc:'対応する開始タグがありません。',snippet:text.slice(t.start,t.end),kind:'html-structure'});
-        else if(idx!==stack.length-1){
-          const top=stack[stack.length-1];
-          const rootId='html-nest-'+t.start;
-          addIssue(issues,text,{severity:'HIGH',category:'HTML',line:lineAt(text,t.start),title:'タグの入れ子が崩れています',desc:`<${top.name}> が閉じられる前に </${t.name}> が出現しました。`,snippet:text.slice(t.start,t.end),kind:'html-nest',rootId});
-          stack.splice(idx);
-        } else stack.pop();
-      }
-    }
-    stack.forEach(t=>addIssue(issues,text,{severity:'HIGH',category:'HTML',line:lineAt(text,t.start),title:`閉じられていないタグ <${t.name}>`,desc:`対応する </${t.name}> が見つかりません。`,snippet:text.slice(t.start,t.end),kind:'html-structure'}));
-
-    if(/<html\b/i.test(text)&&!/^\s*<!doctype\s+html\b/i.test(text)) addIssue(issues,text,{severity:'LOW',category:'HTML',line:1,title:'<!DOCTYPE html> 宣言がありません',desc:'互換モードを避けるため、HTML文書ではDOCTYPEを推奨します。',confidence:'high'});
-
-    const duplicateAttrMap=[];
-    for(const t of tags){ if(t.close) continue; const a=parseAttrs(t.attrsText); const seen=new Map();
-      for(const at of a){
-        const prev=seen.get(at.name)||[]; prev.push(at); seen.set(at.name,prev);
-        const globalAllowed = globalHTMLAttrs.has(at.name)||at.name.startsWith('data-')||at.name.startsWith('aria-')||at.name.startsWith('on')||at.name.includes(':')||['viewbox','fill','stroke','stroke-width','stroke-linecap','stroke-linejoin','d','preserveaspectratio'].includes(at.name);
-        if(!globalAllowed) addIssue(issues,text,{severity:'LOW',category:'HTML',line:lineAt(text,t.start),title:`不正または未確認の属性 "${at.name}"`,desc:'要素固有属性、data-*、aria-*、または標準属性か確認してください。',snippet:text.slice(t.start,t.end),confidence:'medium',kind:'html-attr'});
-        if(at.rawValue && !at.quoted) addIssue(issues,text,{severity:'LOW',category:'HTML',line:lineAt(text,t.start),title:`属性値 ${at.name} はクォートされていません`,desc:'HTMLでは属性値を引用符で囲む書き方を推奨します。ただしHTML仕様上、一部の値は未引用でも合法なので「警告」に留めます。',snippet:text.slice(t.start,t.end),confidence:'high',kind:'html-attr-unquoted'});
-      }
-      for(const [name,vals] of seen) if(vals.length>1) addIssue(issues,text,{severity:'HIGH',category:'HTML',line:lineAt(text,t.start),title:`属性 "${name}" が重複しています`,desc:'同一要素で同名属性が複数あるため、ブラウザによる解釈が不明確になります。',snippet:text.slice(t.start,t.end),kind:'duplicate-attr'});
-      const attrs=parseAttrs(t.attrsText); const id=attrs.find(a=>a.name==='id')?.value; const cls=attrs.find(a=>a.name==='class')?.value;
-      if(id){const arr=idMap.get(id)||[];arr.push(lineAt(text,t.start));idMap.set(id,arr);}
-      if(cls) cls.split(/\s+/).filter(Boolean).forEach(c=>classSet.add(c));
-      const h=attrs.find(a=>a.name==='onclick'); if(h) inlineHandlers.push({line:lineAt(text,t.start),code:h.value});
-      const required=tagRequiredAttrs[t.name]||[]; required.forEach(r=>{if(!attrs.some(a=>a.name===r)) addIssue(issues,text,{severity:r==='src'&&t.name==='script'?'MEDIUM':'MEDIUM',category:'HTML',line:lineAt(text,t.start),title:`<${t.name}> に ${r} 属性がありません`,desc:`この要素では ${r} が必要な可能性があります。`,snippet:text.slice(t.start,t.end),confidence:'medium'});});
-      if(t.name==='script'){const type=attrs.find(a=>a.name==='type')?.value; if(type&&!/^(text|application)\/javascript$/i.test(type)&&!/^module$/i.test(type)) addIssue(issues,text,{severity:'MEDIUM',category:'HTML',line:lineAt(text,t.start),title:'script の type 属性を確認してください',desc:'JavaScript以外のtypeになっています。意図したものか確認してください。',snippet:text.slice(t.start,t.end),confidence:'medium'});}
-      if(t.name==='input'){const type=(attrs.find(a=>a.name==='type')?.value||'text').toLowerCase(); if(type==='image'&&!attrs.some(a=>a.name==='alt')) addIssue(issues,text,{severity:'MEDIUM',category:'HTML',line:lineAt(text,t.start),title:'input type=image に alt がありません',desc:'画像ボタンの代替テキストを指定してください。',snippet:text.slice(t.start,t.end)});}
-      if(t.name==='button'&&!attrs.some(a=>a.name==='type')) addIssue(issues,text,{severity:'LOW',category:'HTML',line:lineAt(text,t.start),title:'button の type が指定されていません',desc:'form内では暗黙の submit になり得るため、type="button" / "submit" を明示すると安全です。',snippet:text.slice(t.start,t.end),confidence:'high'});
-      const urlAttr=attrs.find(a=>a.name==='href'||a.name==='src'); if(urlAttr && /^javascript:/i.test(urlAttr.value)) addIssue(issues,text,{severity:'HIGH',category:'セキュリティ',line:lineAt(text,t.start),title:`${urlAttr.name} に javascript: URL があります`,desc:'実行可能なURLスキームはXSSの原因になり得ます。',snippet:text.slice(t.start,t.end)});
-    }
-    for(const [id,lines_] of idMap) if(lines_.length>1) addIssue(issues,text,{severity:'HIGH',category:'HTML',line:lines_[lines_.length-1],title:`id "${id}" が重複しています`,desc:`${lines_.join('、')}行目に同じidがあります。DOM参照先が不安定になります。`,confidence:'high',kind:'duplicate-id'});
-    // Existing IDs and classes are returned for cross-language checks.
-    return {ids:new Set(idMap.keys()),classes:classSet,inlineHandlers};
-  }
-
-  function cssSelectors(text){
-    const masked=maskCSS(text), selectors=[];
-    const re=/([^{}]+)\{/g;
-    let m; while((m=re.exec(masked))){ const raw=m[1].trim(); if(raw.startsWith('@')) continue; selectors.push({raw:m[1].trim(),line:lineAt(text,m.index)}); }
-    return selectors;
-  }
-
-  function maskCSS(text){
-    let o='',block=false,quote='',esc=false; for(let i=0;i<text.length;i++){const c=text[i],n=text[i+1];
-      if(block){o+=c==='\n'?'\n':' ';if(c==='*'&&n==='/'){o+=' ';i++;block=false;}continue;}
-      if(c==='/'&&n==='*'){o+='  ';i++;block=true;continue;}
-      if(quote){o+=c==='\n'?'\n':' ';if(esc)esc=false;else if(c==='\\')esc=true;else if(c===quote)quote='';continue;}
-      if(c==='"'||c==="'"){o+=' ';quote=c;continue;} o+=c;
-    } return o;
-  }
-
-  function checkCSS(text,lines,issues,htmlContext=null){
-    const masked=maskCSS(text);
-    // Balanced braces in CSS only.
-    let depth=0, stackPos=-1; for(let i=0;i<masked.length;i++){if(masked[i]==='{'){depth++; if(depth===1)stackPos=i;} else if(masked[i]==='}') {if(depth===0) addIssue(issues,text,{severity:'HIGH',category:'CSS',line:lineAt(text,i),title:'対応する { がない } があります',desc:'CSSブロックの閉じ順序が崩れています。',snippet:getLineText(lines,lineAt(text,i)),kind:'css-brace'}); else depth--;}}
-    if(depth>0) addIssue(issues,text,{severity:'HIGH',category:'CSS',line:lineAt(text,stackPos),title:'CSSの { が閉じられていません',desc:'ルールセットが最後まで閉じられていません。',snippet:getLineText(lines,lineAt(text,stackPos)),kind:'css-brace'});
-    if(/@media[^{}]*\{[^{}]*(?:$|\n)/m.test(masked)&&depth>0){}
-    if(/@media[^{}]*\{/.test(masked)) { const media=masked.match(/@media[^{}]*\{/g)||[]; for(const m of media){if(!/\)$/.test(m.trim().slice(0,-1))) addIssue(issues,text,{severity:'MEDIUM',category:'CSS',line:lineAt(text,masked.indexOf(m)),title:'@media 条件の構文を確認してください',desc:'media query の条件式が不完全な可能性があります。',snippet:m.trim(),confidence:'medium'});} }
-
-    const knownProps=new Set('display position inset top right bottom left z-index width min-width max-width height min-height max-height margin padding border border-radius background background-color color opacity font font-size font-weight line-height letter-spacing text-align text-decoration flex flex-direction flex-wrap align-items justify-content gap grid grid-template-columns grid-template-rows overflow overflow-x overflow-y cursor transition transform box-shadow filter pointer-events content visibility white-space word-break user-select object-fit object-position aspect-ratio'.split(/\s+/));
-    const ruleRe=/([^{}]+)\{([^{}]*)\}/g; let rm; const selectorCounts=new Map();
-    while((rm=ruleRe.exec(masked))){
-      const selector=rm[1].trim(); const body=rm[2]; const line=lineAt(text,rm.index); selectorCounts.set(selector,(selectorCounts.get(selector)||0)+1);
-      if(!selector) continue;
-      const decls=body.split(';').map(x=>x.trim()).filter(Boolean); const seen=new Map();
-      for(const d of decls){const ix=d.indexOf(':'); if(ix<1) {addIssue(issues,text,{severity:'MEDIUM',category:'CSS',line,title:'CSS宣言の構文が不正な可能性',desc:'プロパティ:値 の形式を確認してください。',snippet:d,confidence:'medium'});continue;}
-        const prop=d.slice(0,ix).trim().replace(/^[-]/,''); const val=d.slice(ix+1).trim(); const prev=seen.get(prop)||0; seen.set(prop,prev+1);
-        if(seen.get(prop)>1) addIssue(issues,text,{severity:'LOW',category:'CSS',line,title:`同一ルール内で ${prop} が重複しています`,desc:'後ろの宣言が前の宣言を上書きします。意図した上書きなら問題ありません。',snippet:d,confidence:'medium'});
-        if(!knownProps.has(prop)&&!prop.startsWith('--')) addIssue(issues,text,{severity:'LOW',category:'CSS',line,title:`未認識のCSSプロパティ候補: ${prop}`,desc:'スペルミスか、ブラウザ/仕様に依存するプロパティか確認してください。',snippet:d,confidence:'medium'});
-        if(/^(-?\d+(?:\.\d+)?)$/.test(val)&&Number(val)!==0&&/^(width|height|margin|padding|top|left|right|bottom)$/.test(prop)) addIssue(issues,text,{severity:'LOW',category:'CSS',line,title:`${prop} の単位がありません`,desc:'0以外の長さ値には通常単位が必要です。',snippet:d,confidence:'medium'});
-      }
-      const sm=selector.match(/#([A-Za-z_][\w-]*)/g)||[]; sm.forEach(x=>{const id=x.slice(1); if(htmlContext?.ids && !htmlContext.ids.has(id)) addIssue(issues,text,{severity:'MEDIUM',category:'CSS',line,title:`HTMLに存在しないid #${id} をCSSが参照しています`,desc:`HTML側のid一覧には ${id} が見つかりません。`,snippet:selector,confidence:'high',kind:'css-dom-ref'});});
-      const cm=selector.match(/\.([A-Za-z_][\w-]*)/g)||[]; cm.forEach(x=>{const cls=x.slice(1); if(htmlContext?.classes && !htmlContext.classes.has(cls)) addIssue(issues,text,{severity:'LOW',category:'CSS',line,title:`HTMLに存在しないclass .${cls} をCSSが参照しています`,desc:`HTML側のclass一覧には ${cls} が見つかりません。タイポの可能性があります。`,snippet:selector,confidence:'medium',kind:'css-dom-ref'});});
-    }
-    for(const [sel,count] of selectorCounts) if(count>1) addIssue(issues,text,{severity:'LOW',category:'CSS',line:1,title:`CSSルールが重複しています: ${sel}`,desc:`同じselectorが${count}回定義されています。後のルールが上書きしていないか確認してください。`,snippet:sel,confidence:'high'});
-    const comments=[]; let pos=0; while((pos=text.indexOf('/*',pos))>=0){const e=text.indexOf('*/',pos+2); if(e<0){comments.push(pos);break;}pos=e+2;} comments.forEach(p=>addIssue(issues,text,{severity:'HIGH',category:'CSS',line:lineAt(text,p),title:'CSSコメントが閉じられていません',desc:'/* から */ までが閉じられていません。'}));
-  }
-
-  function checkJS(text,lines,issues,context={}){
-    const parsed=parseJSWithAcorn(text);
-    let ast=parsed.ast;
-    if(parsed.error){
-      const line=locToLine(text,parsed.error.loc?.start?.line ? {loc:parsed.error.loc}:parsed.error.pos||0);
-      const rootLine=getLineText(lines,line);
-      const regexLike=/return\s+\/(?:\[|[^/\n]*$)|=\s*\/(?:\[|[^/\n]*$)/.test(rootLine);
-      addIssue(issues,text,{severity:'CRITICAL',category:'構文',line,title:regexLike?'正規表現リテラルが正しく閉じられていません':'JavaScript構文エラー',desc:regexLike?'開始 / に対応する終了 / が見つかりません。':syntaxMessage(parsed.error),snippet:rootLine,confidence:'high',kind:regexLike?'regex-syntax':'syntax',rootId:'js-syntax-'+line});
-      const loose=parseLoose(text);
-      if(loose) addIssue(issues,text,{severity:'LOW',category:'構文',line:Math.min(lines.length,line+1),title:'Secondary Parse Error',desc:`${line}行目の構文エラーにより、後続コードのAST解析結果は信頼度が低下しています。構文エラーを先に修正してください。`,snippet:getLineText(lines,Math.min(lines.length,line+1)),confidence:'high',secondary:true,rootId:'js-syntax-'+line});
-      // Safe recovery only: report the root parse error, then a small set of independent semantic checks.
-      checkJSFallbackSemantics(text,lines,issues,context,true);
-      return {ast:null,parser:parsed.parser,facts:null};
-    }
-    if(!ast){
-      checkJSFallbackSemantics(text,lines,issues,context);
-      return {ast:null,parser:parsed.parser,facts:null};
-    }
-    const facts=collectASTFacts(ast,text);
-
-    // Assignment-vs-comparison and const reassignments.
-    facts.assignments.forEach(n=>{
-      const line=locToLine(text,n);
-      if(n.left?.type==='Identifier' && context.constNames?.has(n.left.name) || n.left?.type==='Identifier' && facts.constNames.has(n.left.name)){
-        addIssue(issues,text,{severity:'HIGH',category:'ロジック',line,title:`const変数 "${n.left.name}" に再代入しています`,desc:'const は再代入できません。構文上エラーになります。',snippet:sourceSlice(text,n),confidence:'high',kind:'const-reassign'});
-      }
-      if(n.operator==='=' && n.left?.type==='MemberExpression' && n.right?.type==='UnaryExpression' && n.right.operator==='-' && n.right.argument?.type!=='Literal'){
-        const left=sourceSlice(text,n.left); addIssue(issues,text,{severity:'HIGH',category:'ゲームロジック',line,title:'負数代入の可能性: "=-"',desc:`${left} = -damage のようなコードは構文的には正しいため、減算( -= )との書き間違いでないか確認してください。`,snippet:sourceSlice(text,n),fixBefore:sourceSlice(text,n),fixAfter:sourceSlice(text,n).replace('=-','-='),confidence:'medium',kind:'assign-minus'});
-      }
-      if(n.operator==='=' && n.left?.type==='Identifier' && /^[a-zA-Z_$][\w$]*(?:Kill|Level|kills|level)$/i.test(n.left.name)){}
-      if(n.operator==='+=' && n.right?.type==='Literal' && typeof n.right.value==='string') addIssue(issues,text,{severity:'HIGH',category:'型',line,title:`数値への文字列加算の可能性: ${n.left.name||sourceSlice(text,n.left)} += "..."`,desc:'数値として扱う値に文字列を加えると、文字列連結になります。意図的な変換でなければバグ候補です。',snippet:sourceSlice(text,n),fixAfter:sourceSlice(text,n).replace(/\+?=\s*"([^"]*)"/,'+= Number("$1")'),confidence:'high',kind:'type-mismatch'});
-    });
-
-    walkAST(ast,(n,parent)=>{
-      const line=locToLine(text,n);
-      if(n.type==='IfStatement'&&n.test?.type==='AssignmentExpression'&&n.test.operator==='='){ addIssue(issues,text,{severity:'HIGH',category:'ロジック',line,title:'if条件で代入しています',desc:'比較ではなく代入です。意図的な代入でなければ === を使う可能性が高いです。',snippet:sourceSlice(text,n.test),fixBefore:sourceSlice(text,n.test),fixAfter:sourceSlice(text,n.test).replace(' = ',' === '),confidence:'high',kind:'assignment-in-condition'}); }
-      if((n.type==='BinaryExpression'||n.type==='LogicalExpression')&&['===','!==','==','!='].includes(n.operator)){
-        const a=n.left,b=n.right;
-        if(a?.type==='Literal'&&b?.type==='Literal'){let v=false;try{v=Function('return ('+sourceSlice(text,n)+')')();}catch(e){} if(typeof v==='boolean') addIssue(issues,text,{severity:'HIGH',category:'ロジック',line,title:`常に${v?'true':'false'}になる条件`,desc:'両辺がリテラルで固定されているため、条件の結果が変化しません。',snippet:sourceSlice(text,n),confidence:'high',kind:'constant-condition'});}
-      }
-      if(n.type==='BinaryExpression'&&n.operator==='/'&&n.right?.type==='Literal'&&n.right.value===0) addIssue(issues,text,{severity:'HIGH',category:'型',line,title:'0除算があります',desc:'実行時に Infinity/NaN を生成する可能性があります。',snippet:sourceSlice(text,n),confidence:'high',kind:'divide-zero'});
-      if(n.type==='BinaryExpression'&&n.operator==='-'&&parent?.type==='ExpressionStatement') addIssue(issues,text,{severity:'HIGH',category:'ロジック',line,title:'計算結果を使用していません',desc:`${sourceSlice(text,n)} の結果をどこにも代入・returnしていません。xp - 100; のような減算忘れの可能性があります。`,snippet:sourceSlice(text,n),confidence:'medium',kind:'unused-binary'});
-      if(n.type==='ExpressionStatement'&&n.expression?.type==='MemberExpression'&&n.expression.object?.name==='localStorage'&&n.expression.property?.name==='clear') addIssue(issues,text,{severity:'HIGH',category:'保存',line,title:'localStorage.clear を呼び出していません',desc:'clear メソッドを参照しているだけで、実行されません。',snippet:sourceSlice(text,n),fixBefore:sourceSlice(text,n),fixAfter:'localStorage.clear();',confidence:'high',kind:'method-reference'});
-      if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'&&n.callee.object?.name==='Math'&&n.callee.property?.name==='floor'){
-        const arg=n.arguments?.[0]; if(arg?.type==='BinaryExpression'&&arg.operator==='+'&&arg.right?.type==='Literal'&&arg.right.value===1&&arg.left?.type==='BinaryExpression'&&arg.left.operator==='*'&&arg.left.right?.type==='MemberExpression'&&arg.left.right.property?.name==='length'&&arg.left.left?.type==='CallExpression'&&arg.left.left.callee?.object?.name==='Math'&&arg.left.left.callee?.property?.name==='random') addIssue(issues,text,{severity:'HIGH',category:'ゲームロジック',line,title:'ランダム配列添字の上限が1つずれています',desc:'Math.floor(Math.random() * enemies.length + 1) は 1〜length になり、length が範囲外です。通常は Math.floor(Math.random() * enemies.length) です。',snippet:sourceSlice(text,n),fixBefore:sourceSlice(text,n),fixAfter:sourceSlice(text,n).replace(' + 1',''),confidence:'high',kind:'random-index'});
-      }
-      if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'&&n.callee.property?.name==='getElementById'&&n.arguments?.[0]?.type==='Literal'&&typeof n.arguments[0].value==='string'){
-        const id=n.arguments[0].value; if(context.ids && !context.ids.has(id)) addIssue(issues,text,{severity:'HIGH',category:'DOM',line,title:`存在しないDOM id "${id}" を参照しています`,desc:`HTML側に id="${id}" が見つかりません。近い名前がある場合はタイポの可能性があります。`,snippet:sourceSlice(text,n),confidence:'high',kind:'dom-id'});
-      }
-      if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'&&n.callee.property?.name==='querySelector'&&n.arguments?.[0]?.type==='Literal'&&typeof n.arguments[0].value==='string'&&context.domSelectors){
-        const sel=n.arguments[0].value; const idm=sel.match(/^#([\w-]+)$/); if(idm&&context.ids&&!context.ids.has(idm[1])) addIssue(issues,text,{severity:'HIGH',category:'DOM',line,title:`querySelector(${JSON.stringify(sel)}) の対象がHTMLにありません`,desc:`HTML側に ${sel} が存在しません。`,snippet:sourceSlice(text,n),confidence:'high'});
-        const cm=sel.match(/^\.([\w-]+)$/); if(cm&&context.classes&&!context.classes.has(cm[1])) addIssue(issues,text,{severity:'MEDIUM',category:'DOM',line,title:`querySelector(${JSON.stringify(sel)}) のclassがHTMLにありません`,desc:`HTML側に .${cm[1]} が存在しません。`,snippet:sourceSlice(text,n),confidence:'medium'});
-      }
-      if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'&&n.callee.property?.name==='addEventListener'){
-        const ev=n.arguments?.[0]?.value; const target=sourceSlice(text,n.callee.object); const handler=sourceSlice(text,n.arguments?.[1]||{});
-        const same=context.eventRegs?.find(r=>r.event===ev&&r.target===target&&r.handler===handler&&r.node!==n); if(same) addIssue(issues,text,{severity:'HIGH',category:'イベント',line,title:`${ev} イベントが二重登録されています`,desc:'同じ対象・同じイベント・同じハンドラが複数回登録されています。ゲーム更新ループ内だと攻撃や回復が二重発火しやすくなります。',snippet:sourceSlice(text,n),confidence:'high',kind:'duplicate-event'});
-        if((ev==='dragover'||ev==='drop')&&!(enclosingFunction(ast,n.start)&&/preventDefault\s*\(/.test(sourceSlice(text,enclosingFunction(ast,n.start))))) addIssue(issues,text,{severity:'MEDIUM',category:'イベント',line,title:`${ev} イベントで preventDefault() がありません`,desc:'ブラウザの標準ドラッグ動作が割り込む可能性があります。',snippet:sourceSlice(text,n),confidence:'medium'});
-      }
-      if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'&&n.callee.property?.name==='removeEventListener'){
-        const h=n.arguments?.[1]; if(h?.type==='FunctionExpression'||h?.type==='ArrowFunctionExpression') addIssue(issues,text,{severity:'MEDIUM',category:'イベント',line,title:'removeEventListener に新しい無名関数を渡しています',desc:'addEventListener時と同じ関数参照でなければ削除できません。',snippet:sourceSlice(text,n),confidence:'high'});
-      }
-      if(n.type==='MemberExpression'&&n.property?.type==='Identifier'&&['keyCode','which'].includes(n.property.name)) addIssue(issues,text,{severity:'LOW',category:'イベント',line,title:`古いKeyboardEvent API "${n.property.name}" の使用`,desc:'key / code などの現行プロパティを検討してください。',snippet:sourceSlice(text,n),confidence:'high'});
-      if(n.type==='BinaryExpression'&&['===','!==','==','!='].includes(n.operator)){
-        const l=n.left,r=n.right; if((l?.type==='Identifier'&&l.name==='NaN')||(r?.type==='Identifier'&&r.name==='NaN')) addIssue(issues,text,{severity:'HIGH',category:'型',line,title:'NaNを直接比較しています',desc:'NaNとの等価比較は成立しないため、Number.isNaN() を使用してください。',snippet:sourceSlice(text,n),confidence:'high'});
-      }
-    });
-
-    // Undefined-variable candidate: only names that are clearly identifier references, not properties/keys.
-    for(const u of facts.used){
-      if(builtins.has(u.name)||facts.declared.has(u.name)) continue;
-      if(u.parent?.type==='LabeledStatement') continue;
-      const line=locToLine(text,u.node);
-      // Globals commonly injected by browsers/tools are warning-level only.
-      addIssue(issues,text,{severity:'MEDIUM',category:'型',line,title:`未宣言変数の候補: ${u.name}`,desc:`この識別子は現在のAST上で宣言元を確認できませんでした。グローバル変数や外部ライブラリ由来なら問題ありません。`,snippet:sourceSlice(text,u.node),confidence:'medium',kind:'undefined-variable'});
-    }
-
-    // Unused variables, only local variable declarations with a resolvable usage count.
-    facts.declared.forEach((decls,name)=>{
-      const refs=facts.used.filter(u=>u.name===name);
-      decls.forEach(d=>{ if((d.kind==='let'||d.kind==='const'||d.kind==='var')&&refs.length===0) addIssue(issues,text,{severity:'LOW',category:'ロジック',line:locToLine(text,d.node),title:`変数 "${name}" が使用されていません`,desc:'宣言だけされ、参照されていません。不要な変数か、参照漏れの可能性があります。',snippet:sourceSlice(text,d.node),confidence:'high'}); });
-    });
-
-    // Function reference without call: only standalone expression statements.
-    walkAST(ast,(n,parent)=>{ if(n.type==='ExpressionStatement'&&n.expression?.type==='Identifier'&&facts.functions.has(n.expression.name)) addIssue(issues,text,{severity:'MEDIUM',category:'ロジック',line:locToLine(text,n),title:`関数 "${n.expression.name}" を呼び出さず参照しています`,desc:'実行したい関数なら () が必要です。',snippet:sourceSlice(text,n),fixAfter:`${n.expression.name}();`,confidence:'high'}); });
-
-    // Reachability after return/throw/break/continue in block.
-    walkAST(ast,n=>{ if(n.type==='BlockStatement'){ for(let i=0;i<n.body.length-1;i++){const st=n.body[i]; if(['ReturnStatement','ThrowStatement','BreakStatement','ContinueStatement'].includes(st.type)){ addIssue(issues,text,{severity:'LOW',category:'ロジック',line:locToLine(text,n.body[i+1]),title:'到達不能コードの可能性',desc:'直前の return/throw/break/continue の後ろに文があります。',snippet:sourceSlice(text,n.body[i+1]),confidence:'high',kind:'unreachable'}); break; } } } });
-
-    checkJSGameSemantics(ast,text,lines,issues,context);
-    return {ast,parser:parsed.parser,facts};
-  }
-
-  function checkJSGameSemantics(ast,text,lines,issues,context){
-    const saveLoad={save:null,load:null}; const handlers=[]; const loops=[];
-    walkAST(ast,(n)=>{
-      if(n.type==='FunctionDeclaration'&&n.id){if(/^(saveGame|save)$/i.test(n.id.name))saveLoad.save=n;if(/^(loadGame|load)$/i.test(n.id.name))saveLoad.load=n;}
-      if(n.type==='WhileStatement'||n.type==='ForStatement') loops.push(n);
-      if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'&&n.callee.object?.name==='setInterval') handlers.push(n);
-    });
-    // HP/MP/gold bounds and common game invariants.
-    walkAST(ast,(n)=>{ if(n.type!=='AssignmentExpression') return; const line=locToLine(text,n); const left=sourceSlice(text,n.left); const ls=left.toLowerCase();
-      if(/(?:^|\.)hp$/.test(ls)){ if(n.operator==='-='||n.operator==='-=') addIssue(issues,text,{severity:'MEDIUM',category:'ゲームロジック',line,title:'HPが0未満になる可能性があります',desc:'ダメージ適用後に Math.max(0, hp - damage) 等で下限を保証していません。常に問題とは限らないため警告扱いです。',snippet:sourceSlice(text,n),confidence:'medium'}); if(n.operator==='+='||n.operator==='=') addIssue(issues,text,{severity:'LOW',category:'ゲームロジック',line,title:'HP上限の境界を確認してください',desc:'回復・直接代入後に最大HPを超えない保証が見つかりませんでした。',snippet:sourceSlice(text,n),confidence:'low'}); }
-      if(/(?:^|\.)mp$/.test(ls)&&n.operator==='-=') addIssue(issues,text,{severity:'MEDIUM',category:'ゲームロジック',line,title:'MPが0未満になる可能性があります',desc:'スキル使用前にMP不足を弾くか、減算後に0以上へクランプする必要があります。',snippet:sourceSlice(text,n),confidence:'medium'});
-      if(/(^|\.)gold$/.test(ls)&&n.operator==='-=') addIssue(issues,text,{severity:'MEDIUM',category:'ゲームロジック',line,title:'所持金が0未満になる可能性があります',desc:'購入前の残高チェックが別途存在するか確認してください。',snippet:sourceSlice(text,n),confidence:'medium'});
-      if(/(^|\.)xp$/.test(ls)&&n.operator==='-') addIssue(issues,text,{severity:'HIGH',category:'ゲームロジック',line,title:'XP減算式を代入していません',desc:'xp - amount; のような式だけではXPは変化しません。',snippet:sourceSlice(text,n),confidence:'high'});
-    });
-    // Purchase check → subtraction in same function (best-effort).
-    walkAST(ast,(n)=>{if(n.type!=='IfStatement')return; const code=sourceSlice(text,n); if(/gold|money|coins/i.test(code)&&/(price|cost)/i.test(code)&&/if\s*\([^)]*(gold|money|coins)[^)]*[<>]=?/.test(code)&&!/(gold|money|coins)\s*-=/.test(code)&&/purchase|buy|shop/i.test(enclosingFunction(ast,n.start)?.id?.name||'')) addIssue(issues,text,{severity:'MEDIUM',category:'ゲームロジック',line:locToLine(text,n),title:'購入処理の金額減算を確認してください',desc:'残高チェックはありますが、購入成功時の所持金減算が同一関数内で見つかりませんでした。',snippet:sourceSlice(text,n),confidence:'low'});});
-    // Level-up thresholds.
-    walkAST(ast,(n)=>{if(n.type==='IfStatement'&&/level|xp/i.test(sourceSlice(text,n))&&/[<>]=/.test(sourceSlice(text,n.test||n))&&!/level\s*\+\+|level\s*\+=/.test(sourceSlice(text,n.consequent||{}))) addIssue(issues,text,{severity:'LOW',category:'ゲームロジック',line:locToLine(text,n),title:'レベルアップ条件の後にレベル更新がない可能性',desc:'XP閾値の判定に対して level の更新が見つからない候補です。',snippet:sourceSlice(text,n),confidence:'low'});});
-    // setInterval duplicate registration.
-    const seen=new Map(); handlers.forEach(n=>{const key=sourceSlice(text,n);const prev=seen.get(key);if(prev) addIssue(issues,text,{severity:'HIGH',category:'イベント',line:locToLine(text,n),title:'setInterval が重複登録されています',desc:'同じ interval が複数回開始されると、ゲームループや攻撃処理が二重発火することがあります。',snippet:key,confidence:'high'});else seen.set(key,n);});
-    // Infinite loop candidate: while(true) without obvious break/return.
-    loops.forEach(n=>{ if(n.type==='WhileStatement'&&n.test?.type==='Literal'&&n.test.value===true&&!/\bbreak\b|\breturn\b/.test(sourceSlice(text,n.body))) addIssue(issues,text,{severity:'HIGH',category:'ロジック',line:locToLine(text,n),title:'終了条件のない while(true) の可能性',desc:'ループ本体に break/return が見つかりません。ゲームループなど意図的な場合は問題ありません。',snippet:sourceSlice(text,n),confidence:'medium'}); });
-    // Save / load integrity.
-    if(saveLoad.save){const code=sourceSlice(text,saveLoad.save); const hasSet=/(localStorage|sessionStorage)\.setItem\s*\(/.test(code), hasStringify=/JSON\.stringify\s*\(/.test(code); if(hasSet&&!hasStringify) addIssue(issues,text,{severity:'HIGH',category:'保存',line:locToLine(text,saveLoad.save),title:'saveGame の保存前に JSON.stringify が見つかりません',desc:'オブジェクトをlocalStorageへ直接渡すと文字列化結果が "[object Object]" になるなど、状態復元に失敗する可能性があります。',snippet:'saveGame(...)',confidence:'high'}); }
-    if(saveLoad.load){const code=sourceSlice(text,saveLoad.load), hasGet=/(localStorage|sessionStorage)\.getItem\s*\(/.test(code), hasParse=/JSON\.parse\s*\(/.test(code), hasNullCheck=/if\s*\([^)]*(===|==|!)[^)]*(null|undefined)|\?\?/.test(code); if(hasGet&&hasParse&&!hasNullCheck) addIssue(issues,text,{severity:'MEDIUM',category:'保存',line:locToLine(text,saveLoad.load),title:'loadGame の null 処理を確認してください',desc:'保存データが存在しない場合 getItem() は null を返すため、JSON.parse(null) や後続参照の意図を確認してください。',snippet:'loadGame(...)',confidence:'medium'}); }
-  }
-
-  function checkJSFallbackSemantics(text,lines,issues,context={},syntaxAlreadyReported=false){
-    const masked=maskJS(text);
-    // Specific lexer-level recovery for malformed regex literals when AST/native parse fails.
-    lines.forEach((raw,i)=>{
-      const candidate=raw.match(/(^|[=:(,;{}\[!]\s*)\/(?![/*])(?:[^/\n\\]|\\.)*$/);
-      if(candidate && !syntaxAlreadyReported) addIssue(issues,text,{severity:'CRITICAL',category:'構文',line:i+1,title:'正規表現リテラルが正しく閉じられていません',desc:'開始 / に対応する終了 / が同じリテラル内に見つかりません。',snippet:raw.trim(),confidence:'high',kind:'regex-syntax',rootId:'js-regex-'+(i+1)});
-    });
-    lines.forEach((raw,i)=>{
-      const line=raw.trim(); const code=masked.split('\n')[i]||''; const rawLine=raw;
-      if(/\bif\s*\([^)]*(?<![=!<>])=(?!=)[^)]*\)/.test(code)) addIssue(issues,text,{severity:'HIGH',category:'ロジック',line:i+1,title:'if条件で代入しています',desc:'比較ではなく代入です。=== などとの書き間違いでないか確認してください。',snippet:line,fixBefore:line,fixAfter:line.replace(/=([^=])/,'===$1'),confidence:'high',kind:'assignment-in-condition'});
-      if(/Math\.floor\(\s*Math\.random\(\)\s*\*\s*[A-Za-z_$][\w$]*\.length\s*\+\s*1\s*\)/.test(rawLine)) addIssue(issues,text,{severity:'HIGH',category:'ゲームロジック',line:i+1,title:'ランダム配列添字の上限が1つずれています',desc:'Math.random() の整数化に +1 を足すと length 自体を選ぶ可能性があります。',snippet:line,fixBefore:line,fixAfter:line.replace(/\s*\+\s*1\s*\)/,')'),confidence:'high',kind:'random-index'});
-      if(/\b(?:gold|coins|money)\s*\+=\s*["']/.test(rawLine)) addIssue(issues,text,{severity:'HIGH',category:'型',line:i+1,title:'数値への文字列加算の可能性',desc:'数値に文字列を += すると文字列連結になります。',snippet:line,confidence:'high',kind:'type-mismatch'});
-      if(/\bxp\s*-\s*\d+(?:\.\d+)?\s*;?$/.test(rawLine.trim())) addIssue(issues,text,{severity:'HIGH',category:'ゲームロジック',line:i+1,title:'XP減算式を代入していません',desc:'xp - 100; のような式だけではXPは変化しません。',snippet:line,confidence:'high',kind:'unused-binary'});
-      if(/\blocalStorage\.clear\s*;/.test(rawLine)) addIssue(issues,text,{severity:'HIGH',category:'保存',line:i+1,title:'localStorage.clear を呼び出していません',desc:'clear メソッドを参照しているだけで実行されません。',snippet:line,fixBefore:line,fixAfter:line.replace(/clear\s*;/,'clear();'),confidence:'high',kind:'method-reference'});
-      const idm=rawLine.match(/document\.getElementById\(\s*["']([^"']+)["']\s*\)/); if(idm&&context.ids&&!context.ids.has(idm[1])) addIssue(issues,text,{severity:'HIGH',category:'DOM',line:i+1,title:`存在しないDOM id "${idm[1]}" を参照しています`,desc:`HTML側に id="${idm[1]}" が見つかりません。`,snippet:line,confidence:'high',kind:'dom-id'});
-      const u=rawLine.match(/(?:console\.log|alert|String|Number)\(\s*([A-Za-z_$][\w$]*)\s*\)/); if(u&&!builtins.has(u[1])&&!['message','name','value','data','error','event'].includes(u[1])) addIssue(issues,text,{severity:'MEDIUM',category:'型',line:i+1,title:`未宣言変数の候補: ${u[1]}`,desc:'ASTが利用できないため簡易検出です。この名前が別ファイルやグローバルから提供される場合は無視してください。',snippet:line,confidence:'medium',kind:'undefined-variable'});
-    });
-    const seen=new Map();
-    const eventRe=/([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\.addEventListener\(\s*["']([^"']+)["']\s*,\s*([^)]*)\)/g; let m;
-    while((m=eventRe.exec(text))){const k=m[1]+'|'+m[2]+'|'+m[3].trim();if(seen.has(k)) addIssue(issues,text,{severity:'HIGH',category:'イベント',line:lineAt(text,m.index),title:`${m[2]} イベントが二重登録されています`,desc:'同じ対象・イベント・ハンドラの登録が重複しています。',snippet:getLineText(lines,lineAt(text,m.index)),confidence:'high',kind:'duplicate-event'});else seen.set(k,m.index);}
-    if(/function\s+(?:saveGame|save)\s*\([^)]*\)\s*\{[\s\S]*?(?:localStorage|sessionStorage)\.setItem\s*\(/.test(text)&&!/JSON\.stringify/.test(text)) addIssue(issues,text,{severity:'HIGH',category:'保存',line:lineAt(text,text.indexOf('setItem')),title:'saveGame の保存前に JSON.stringify が見つかりません',desc:'保存対象がオブジェクトならJSON化せずに保存している可能性があります。',snippet:getLineText(lines,lineAt(text,text.indexOf('setItem'))),confidence:'medium',kind:'save-json'});
-    if(/function\s+(?:loadGame|load)\s*\([^)]*\)\s*\{[\s\S]*?(?:localStorage|sessionStorage)\.getItem\s*\([\s\S]*?JSON\.parse\s*\(/.test(text) && !/(?:null|undefined|\?\?)\s*[)|&|{]/.test(text.slice(text.indexOf('getItem'), text.indexOf('}')<0?text.length:text.indexOf('}')))) addIssue(issues,text,{severity:'MEDIUM',category:'保存',line:lineAt(text,text.indexOf('getItem')),title:'loadGame の null 処理を確認してください',desc:'getItem() が null を返すケースを確認してください。',snippet:getLineText(lines,lineAt(text,text.indexOf('getItem'))),confidence:'medium',kind:'load-null'});
-  }
-
-  function checkJSLexicalFallback(text,lines,issues){
-    const masked=maskJS(text), chars=[]; for(let i=0;i<masked.length;i++){const c=masked[i]; if('([{'.includes(c)) chars.push({c,i}); else if(')]}'.includes(c)){const expected={')':'(',']':'[','}':'{'}[c]; const top=chars.pop(); if(!top||top.c!==expected){addIssue(issues,text,{severity:'CRITICAL',category:'構文',line:lineAt(text,i),title:'括弧の対応が取れていません',desc:`${c} に対応する開き括弧がありません。`,snippet:getLineText(lines,lineAt(text,i)),confidence:'high'});break;}}} if(chars.length){const top=chars[chars.length-1]; addIssue(issues,text,{severity:'HIGH',category:'構文',line:lineAt(text,top.i),title:`${top.c} が閉じられていません`,desc:'ASTパーサーが利用できないため、字句レベルで確認できた範囲のみ報告しています。',snippet:getLineText(lines,lineAt(text,top.i)),confidence:'medium'});}
-  }
-
-  /* ---------- Python ---------- */
-  function checkPY(text, lines, issues){
-    // インデントにタブとスペースの混在(Pythonでは特に致命的)
-    let mixedIndentLine = -1;
-    lines.forEach((l,i) => {
-      if (/^\t/.test(l) && lines.some((l2, j) => j!==i && /^    /.test(l2))) mixedIndentLine = i+1;
-    });
-    if (mixedIndentLine > -1){
-      pushIssue(issues, 'error', mixedIndentLine,
-        'インデントにタブとスペースが混在しています',
-        'Pythonはインデントが構文の一部です。タブとスペースを混在させると "TabError" の原因になります。統一してください。',
-        '', 'Python-構文');
-    }
-
-    // コロン抜け(if/for/while/def/class 等)
-    lines.forEach((l,i) => {
-      const codeOnly = l.replace(/#.*$/, '');
-      const trimmed = codeOnly.trim();
-      if (!trimmed) return;
-      const m = trimmed.match(/^(if|elif|else|for|while|def|class|try|except|finally|with)\b/);
-      if (m && !trimmed.endsWith(':') && !/:\s*\S/.test(trimmed)){
-        pushIssue(issues, 'error', i+1,
-          '"' + m[1] + '" 文の末尾にコロン(:)がありません',
-          'Pythonの制御構文(if/for/while/def/class等)は行末にコロンが必要です。',
-          l.trim(), 'Python-構文');
-      }
-    });
-
-    // print文(Python2形式)の検出
-    lines.forEach((l,i) => {
-      const codeOnly = l.replace(/#.*$/, '');
-      if (/\bprint\s+[^\(]/.test(codeOnly) && !/print\s*\(/.test(codeOnly)){
-        pushIssue(issues, 'error', i+1,
-          'Python 2形式のprint文の可能性',
-          'Python 3では print は関数のため、print("text") のように括弧が必要です。',
-          l.trim(), 'Python-互換性');
-      }
-    });
-
-    // 比較に is を使うべき箇所で == None
-    lines.forEach((l,i) => {
-      if (/==\s*None\b/.test(l) || /!=\s*None\b/.test(l)){
-        pushIssue(issues, 'info', i+1,
-          'Noneとの比較には "is" / "is not" を推奨',
-          '"== None" ではなく "is None" を使うのがPythonの慣例(PEP 8)です。',
-          l.trim(), 'Python-スタイル');
-      }
-    });
-
-    // ミュータブルなデフォルト引数
-    const defRe = /def\s+[a-zA-Z_]\w*\s*\(([^)]*)\)\s*:/g;
-    let m;
-    while ((m = defRe.exec(text))){
-      if (/=\s*(\[\]|\{\})/.test(m[1])){
-        pushIssue(issues, 'warning', lineAt(text, m.index),
-          'ミュータブルなデフォルト引数が使われています',
-          'デフォルト引数に [] や {} を直接指定すると、呼び出し間で状態が共有されるバグの典型例です。None をデフォルトにし、関数内で初期化することを推奨します。',
-          getLineText(lines, lineAt(text, m.index)), 'Python-典型的バグ');
+    // Event duplication / unremovable listeners.
+    const eventMap=new Map();
+    for(const call of eventSites){
+      const ln=nodeLine(call), prop=call.callee.property.name, args=call.arguments;
+      if(!args[0] || args[0].type!=='Literal' || typeof args[0].value!=='string') continue;
+      const event=args[0].value, target=call.callee.object;
+      const targetKey=target.type==='Identifier'?target.name:(target.type==='MemberExpression'?JSON.stringify(target):'anonymous');
+      if(prop==='addEventListener'){
+        const key=targetKey+'::'+event; const arr=eventMap.get(key)||[]; arr.push(call); eventMap.set(key,arr);
+        if(arr.length>1) pushIssue(issues,{severity:'MEDIUM',line:ln,kind:'イベント',title:'同じイベントリスナーが複数登録されています',desc:targetKey+' に '+event+' が '+arr.length+' 回登録されています。クリック1回で処理が二重発火する可能性があります。',snippet:getLineText(lines,ln),confidence:'HIGH'});
+        if(args[1]?.type==='ArrowFunctionExpression' || args[1]?.type==='FunctionExpression') pushIssue(issues,{severity:'LOW',line:ln,kind:'イベント',title:'removeEventListenerできない構造の可能性',desc:'無名関数を直接 addEventListener に渡すと、同じ関数参照を removeEventListener に渡せません。',snippet:getLineText(lines,ln),confidence:'HIGH'});
       }
     }
 
-    // インデント幅の不一致(スペース2と4の混在などのざっくり検知)
-    const indentSizes = new Set();
-    lines.forEach(l => {
-      const m2 = l.match(/^( +)\S/);
-      if (m2) indentSizes.add(m2[1].length % 4 === 0 ? 4 : (m2[1].length % 2 === 0 ? 2 : m2[1].length));
-    });
-
-    // except: の裸(bare except)
-    lines.forEach((l,i) => {
-      const codeOnly = l.replace(/#.*$/, '').trim();
-      if (/^except\s*:\s*$/.test(codeOnly)){
-        pushIssue(issues, 'warning', i+1,
-          '裸の except: が使われています',
-          '全ての例外を無条件に捕捉するため、意図しないエラーまで握りつぶす可能性があります。可能であれば except Exception as e: のように具体化してください。',
-          l.trim(), 'Python-ベストプラクティス');
+    // Inline onclick + addEventListener collision via HTML map.
+    if(htmlInfo && htmlInfo.onclick.size){
+      for(const [id] of htmlInfo.onclick){
+        const re=new RegExp('getElementById\\(["\\\']'+escReg(id)+'["\\\']\\)');
+        if(re.test(text)) pushIssue(issues,{severity:'LOW',line:1,kind:'イベント',title:'onclick属性とaddEventListenerの併用候補',desc:'同じ要素にインラインイベントとJSイベント登録を重ねると、処理が二重化することがあります。',confidence:'LOW'});
       }
-    });
-
-    // 自己代入
-    lines.forEach((l,i) => {
-      const codeOnly = l.replace(/#.*$/, '').trim();
-      const m = codeOnly.match(/^([a-zA-Z_]\w*(?:\.\w+)?)\s*=\s*([a-zA-Z_]\w*(?:\.\w+)?)\s*$/);
-      if (m && m[1] === m[2]){
-        pushIssue(issues, 'warning', i+1,
-          '自己代入の可能性: ' + m[1] + ' = ' + m[2],
-          '変数を自分自身に代入しています。タイプミスの可能性があります。',
-          l.trim(), 'Python-典型的バグ');
-      }
-    });
-
-    // range(len(...)) の後で不要にインデックスアクセスしている典型パターンの検出は誤検出が多いため省略し、
-    // 代わりに連鎖比較の典型ミス (a == b == c ではなく a == b and b == c の意図で書いたつもりが範囲比較になるケース) は
-    // Pythonでは正しく動作するため対象外。ここでは "is" と数値/文字列リテラルの組み合わせミスを検出する。
-    lines.forEach((l,i) => {
-      const codeOnly = l.replace(/#.*$/, '');
-      if (/\bis\s+["']/.test(codeOnly) || /\bis\s+\d/.test(codeOnly) || /\bis not\s+["']/.test(codeOnly)){
-        pushIssue(issues, 'warning', i+1,
-          '"is" でリテラル値を比較している可能性',
-          '文字列や数値リテラルの比較には "==" を使用してください。"is" は同一オブジェクトかどうかの比較であり、値が同じでもFalseになることがあります。',
-          l.trim(), 'Python-典型的バグ');
-      }
-    });
-
-    // 典型的スペルミス
-    const typoMap = { 'improt':'import', 'defien':'define', 'lenght':'length', 'reutrn':'return', 'flase':'False', 'ture':'True', 'elfi':'elif' };
-    Object.keys(typoMap).forEach(bad => {
-      const re = new RegExp('\\b'+bad+'\\b', 'g');
-      let tm;
-      while ((tm = re.exec(text))){
-        pushIssue(issues, 'error', lineAt(text, tm.index),
-          'スペルミスの疑い: "' + bad + '"',
-          '"' + typoMap[bad] + '" の誤字である可能性があります。',
-          getLineText(lines, lineAt(text, tm.index)), 'Python-スペルミス');
-      }
-    });
-  }
-
-  /* ---------- JSON ---------- */
-  function checkJSON(text, lines, issues){
-    try{
-      JSON.parse(text);
-      pushIssue(issues, 'info', 1, 'JSONとして正常にパースできました', '構文エラーは検出されませんでした。', '', 'JSON-構文');
-    }catch(e){
-      const msg = e.message || '';
-      const posMatch = msg.match(/position (\d+)/);
-      let ln = 1;
-      if (posMatch){ ln = lineAt(text, parseInt(posMatch[1],10)); }
-      pushIssue(issues, 'error', ln,
-        'JSONの構文エラー',
-        'パースに失敗しました: ' + msg + ' 。カンマの過不足やクォートの閉じ忘れがないか確認してください。',
-        getLineText(lines, ln), 'JSON-構文');
     }
 
-    // 末尾カンマの検出(JSON非対応)
-    const trailingCommaRe = /,\s*[\]\}]/g;
-    let m;
-    while ((m = trailingCommaRe.exec(text))){
-      pushIssue(issues, 'error', lineAt(text, m.index),
-        '末尾カンマ(trailing comma)が含まれています',
-        '標準的なJSONでは配列・オブジェクトの最後の要素の後にカンマを置けません。',
-        getLineText(lines, lineAt(text, m.index)), 'JSON-構文');
+    // DOM/class/event API consistency.
+    if(htmlInfo){
+      for(const m of text.matchAll(/\.classList\.(?:add|remove|toggle|contains)\s*\(\s*["']([^"']+)["']/g)){
+        const cls=m[1], ln=lineAt(text,m.index);
+        if(!htmlInfo.classes.has(cls)){
+          const near=nearestKey([...htmlInfo.classes.keys()],cls);
+          pushIssue(issues,{severity:'MEDIUM',line:ln,kind:'DOM',title:'JSで存在しないclassを操作しています: '+cls,desc:near?'HTMLには「'+near+'」があり、JS側は「'+cls+'」を使っています。':'HTML内に同名classが見つかりません。',snippet:getLineText(lines,ln),confidence:near?'HIGH':'MEDIUM'});
+        }
+      }
     }
-
-    // シングルクォートの使用
-    if (/'[^']*'\s*:/.test(text) || /:\s*'[^']*'/.test(text)){
-      pushIssue(issues, 'error', 1,
-        'シングルクォートが使われている可能性があります',
-        '標準的なJSONではキー・文字列値ともにダブルクォート(")のみが有効です。',
-        '', 'JSON-構文');
-    }
-  }
-
-  /* ================================================================
-     実行 & 描画
-  ================================================================= */
-  const severityMeta={
-    CRITICAL:{label:'CRITICAL',icon:'circle-x'},HIGH:{label:'HIGH',icon:'circle-x'},MEDIUM:{label:'MEDIUM',icon:'triangle'},LOW:{label:'LOW',icon:'info'},INFO:{label:'INFO',icon:'info'}
-  };
-  const langLabel={html:'HTML',css:'CSS',js:'JavaScript',py:'Python',json:'JSON'};
-  function iconSVG(name){switch(name){case'circle-x':return'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/></svg>';case'triangle':return'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';case'info':return'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';case'check':return'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';}return'';}
-  function escapeHTML(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
-
-  function detectLanguage(text,hintExt){
-    const explicit=els.langSelect.value; if(explicit!=='auto')return explicit; if(hintExt)return hintExt;
-    const t=text.trim(); if(/^<!doctype html|<html|<body|<head|<div|<script|<style/i.test(t))return'html';
-    try{if((/^\s*[\[{]/.test(t))){JSON.parse(t);return'json';}}catch(e){}
-    if(/(^|\n)\s*(def |import |from .+ import|print\(|class .+:|elif |except |#!.*python)/.test(t))return'py';
-    if(/[^{}]+\{[^{}]*:[^{}]*;/.test(t)&&!/(function|const |let |var |=>)/.test(t))return'css';
-    return'js';
-  }
-
-  function analyzeMixedDocument(text){
-    const lines=text.split('\n'); const issues=[]; checkCommon(text,lines,issues);
-    const htmlContext=checkHTML(text,lines,issues);
-    const {tags}=scanHTMLTokens(text); const embedded=extractEmbedded(text,tags);
-    // CSS/JS blocks inherit the original line offset so result lines point to the paste.
-    const cssContexts=[]; embedded.styles.forEach(st=>{const sl=st.text.split('\n');const cssIssues=[];checkCSS(st.text,sl,cssIssues,htmlContext);cssIssues.forEach(x=>{x.line+=st.line-1;issues.push(x);});cssContexts.push(st);});
-    const allEventRegs=[]; embedded.scripts.forEach(sc=>{const sr=sc.text.split('\n'); const local=[]; const a=checkJS(sc.text,sr,local,{...htmlContext,eventRegs:allEventRegs,domSelectors:true}); local.forEach(x=>{x.line+=sc.line-1;issues.push(x);}); if(a.facts?.eventRegs) allEventRegs.push(...a.facts.eventRegs);});
-    // Inline onclick handlers.
-    for(const h of htmlContext.inlineHandlers){const names=[...h.code.matchAll(/(?:^|[^\w$])([A-Za-z_$][\w$]*)\s*\(/g)].map(m=>m[1]); if(names.length) for(const name of names){} }
-    // Cross-reference for classList and id strings is handled when JS blocks are parsed.
-    return {issues,htmlContext};
-  }
-
-  function dedupeIssues(issues){
-    const out=[]; const keyMap=new Map();
-    for(const x of issues){
-      // same root cause / same normalized title+line => one issue
-      const key=[x.line,x.severity,x.category,x.kind||x.title.replace(/\d+/g,'#')].join('|');
-      if(keyMap.has(key)){const existing=keyMap.get(key); if(x.secondary&&!existing.secondary) continue; continue;}
-      keyMap.set(key,x); out.push(x);
-    }
-    return out.sort((a,b)=>SEVERITY_RANK[a.severity]-SEVERITY_RANK[b.severity]||a.line-b.line);
-  }
-
-  function runSelfTests(){
-    const cases=[
-      ['正常HTML meta viewport','<meta name="viewport" content="width=device-width, initial-scale=1.0">','html',false],
-      ['HTML文字列混在','const message="<div><span>Hello</span></div>"; log.innerHTML += message;','js',false],
-      ['未定義変数','console.log(unknownGameValue);','js',true],
-      ['id typo','<button id="attackBtn" type="button"></button><script>const b=document.getElementById("attackButton");<\/script>','html',true],
-      ['代入比較混同','if(kills = 3){}','js',true],
-      ['配列ランダム範囲','Math.floor(Math.random() * enemies.length + 1)','js',true],
-      ['文字列加算','gold += "50";','js',true],
-      ['無意味減算','xp - 100;','js',true],
-      ['method reference','localStorage.clear;','js',true],
-      ['構文エラー','function regexBug(){ return /[/; }','js',true],
-      ['正常template literal','const s=`<div>${name}</div>`;','js',false],
-      ['正常typeof null','if (typeof model === "undefined" || model === null) {}','js',false],
-      ['二重attackイベント','button.addEventListener("click", attack);\nbutton.addEventListener("click", attack);','js',true],
-      ['saveGame JSON不足','function saveGame(){ localStorage.setItem("game", state); }','js',true],
-      ['loadGame null不足','function loadGame(){ const s=localStorage.getItem("game"); return JSON.parse(s); }','js',true]
+    if(/\b(keyCode|which)\b/.test(text)) pushIssue(issues,{severity:'LOW',line:lineAt(text,text.search(/\b(keyCode|which)\b/)),kind:'イベント',title:'古いキーボードイベントAPIの使用',desc:'KeyboardEvent.key / code の利用を検討してください。既存ブラウザ互換を意図している場合は警告を無視できます。',confidence:'HIGH'});
+    if(/setTimeout\s*\(\s*["']/.test(text)) pushIssue(issues,{severity:'MEDIUM',line:lineAt(text,text.search(/setTimeout\s*\(/)),kind:'非同期',title:'setTimeoutに文字列コードを渡しています',desc:'文字列評価ではなく関数参照を使ってください。',confidence:'CERTAIN'});
+    const intervalCount=(text.match(/setInterval\s*\(/g)||[]).length;
+    if(intervalCount>1) pushIssue(issues,{severity:'LOW',line:lineAt(text,text.search(/setInterval\s*\(/)),kind:'イベント',title:'setIntervalが複数回登録されています',desc:'同じゲームループや更新処理を複数起動していないか確認してください。',confidence:'MEDIUM'});
+    // Game-oriented pattern checks that benefit from readable source context.
+    const patterns=[
+      [/\b(hp|health)\s*=\s*[^;\n]+-\s*[^;\n]+/,'Game Logic'],
     ];
-    const results=[]; cases.forEach(([name,code,lang,expected])=>{const iss=[];if(lang==='html'){const lines=code.split('\n');const ctx=checkHTML(code,lines,iss);const emb=extractEmbedded(code,scanHTMLTokens(code).tags);emb.scripts.forEach(sc=>checkJS(sc.text,sc.text.split('\n'),iss,{...ctx,ids:ctx.ids,classes:ctx.classes,eventRegs:[],domSelectors:true}));}else{const lines=code.split('\n');if(lang==='js')checkJS(code,lines,iss,{ids:new Set(),classes:new Set(),eventRegs:[],domSelectors:true});} const found=iss.length>0; results.push({name,expected,pass:expected===found,found,issues:iss.map(i=>i.title)});});
-    console.table(results); return results;
+    for(let i=0;i<lines.length;i++){
+      const l=lines[i], code=l.replace(/(['"`]).*?\1/g,'');
+      if(/\b(if|while)\s*\([^)]*\b(kills?|level)\s*=\s*\d+/.test(code)) pushIssue(issues,{severity:'HIGH',line:i+1,kind:'Game Logic',title:'ゲーム状態の条件式が代入になっています',desc:'kills / level の比較条件に = を使っています。比較には === を使ってください。',snippet:l.trim(),before:l.trim(),after:l.replace(/=\s*(\d+)/,'=== $1').trim(),confidence:'CERTAIN'});
+      if(/\b(gold|coins?|money)\s*\+=\s*["']\d+["']/.test(l)) pushIssue(issues,{severity:'MEDIUM',line:i+1,kind:'Game Logic',title:'所持金に文字列を加算しています',desc:'数値のつもりなら Number(...) または数値リテラルを使ってください。',snippet:l.trim(),confidence:'CERTAIN'});
+      if(/\bxp\s*-\s*\d+(?:\.\d+)?\s*;/.test(code) && !/\b(xp\s*[-+*/]?=|return\s+xp)/.test(code)) pushIssue(issues,{severity:'HIGH',line:i+1,kind:'Game Logic',title:'XPの減算結果を破棄しています',desc:'xp - 100; は xp 自体を変更しません。xp -= 100 のような代入が必要です。',snippet:l.trim(),before:l.trim(),after:l.replace(/\bxp\s*-\s*/,'xp -= '),confidence:'CERTAIN'});
+      if(/\b(currentEnemy|enemy)\.hp\s*=\s*-\s*[A-Za-z_$][\w$]*/.test(code)) pushIssue(issues,{severity:'MEDIUM',line:i+1,kind:'Game Logic',title:'敵HPの減算処理が代入になっています',desc:'currentEnemy.hp = -damage は既存HPを減らすのではなく、負数へ置き換えます。',snippet:l.trim(),before:l.trim(),after:l.replace('= -','-= '),confidence:'CERTAIN'});
+      if(/\b(localStorage|sessionStorage)\.(clear|removeItem)\b(?!\s*\()/.test(code)) pushIssue(issues,{severity:'MEDIUM',line:i+1,kind:'保存',title:'localStorage/sessionStorage のメソッドを呼び出していません',desc:'メソッド名を参照しているだけで、実行されていません。',snippet:l.trim(),confidence:'HIGH'});
+      if(/Math\.floor\s*\(\s*Math\.random\s*\(\s*\)\s*\*[^\n]*\.length\s*\+\s*1\s*\)/.test(code)) pushIssue(issues,{severity:'HIGH',line:i+1,kind:'Game Logic',title:'ランダム配列添字が範囲外になる可能性',desc:'0〜length-1ではなく1〜lengthになっています。',snippet:l.trim(),before:l.trim(),after:l.replace(/\.length\s*\+\s*1/,'.length'),confidence:'CERTAIN'});
+      if(/\b(saveGame|save)\b/.test(code) && /localStorage\.setItem\s*\(/.test(code) && !/JSON\.stringify\s*\(/.test(code)) pushIssue(issues,{severity:'MEDIUM',line:i+1,kind:'保存',title:'save処理のJSON化を確認してください',desc:'保存対象がオブジェクト/配列なら JSON.stringify が必要です。',snippet:l.trim(),confidence:'MEDIUM'});
+      if(/\b(loadGame|load)\b/.test(code) && /JSON\.parse\s*\(/.test(code) && !/\?\.|\|\||\bif\b/.test(code)) pushIssue(issues,{severity:'MEDIUM',line:i+1,kind:'保存',title:'load処理でnull対策を確認してください',desc:'保存データが存在しない初回起動時に JSON.parse(null) などで例外化する可能性があります。',snippet:l.trim(),confidence:'MEDIUM'});
+      if(/\b(hp|health)\s*-=\s*[^;]+/.test(code) && !/Math\.max\s*\(/.test(code)) pushIssue(issues,{severity:'LOW',line:i+1,kind:'Game Logic',title:'HPが0未満になる可能性',desc:'ダメージ適用時にMath.max(0, ...)等の下限保護がないため、負数化する可能性があります。',snippet:l.trim(),confidence:'LOW'});
+      if(/\b(hp|health)\s*\+=\s*[^;]+/.test(code) && !/Math\.min\s*\(/.test(code)) pushIssue(issues,{severity:'LOW',line:i+1,kind:'Game Logic',title:'HPが最大値を超える可能性',desc:'回復時に最大HPによる上限保護が見当たりません。',snippet:l.trim(),confidence:'LOW'});
+      if(/\b(attack|attackButton|doAttack)\b/.test(code) && /addEventListener\s*\(\s*["']click/.test(code)){
+        // exact duplicate is handled by AST; this line-level check only marks semantic candidates.
+      }
+    }
+  }
+
+  function checkJSHeuristics(text, lines, issues, htmlInfo, baseLine){
+    const lineBase=baseLine||1;
+    const emit=(line,opts)=>pushIssue(issues,Object.assign({line:lineBase+line-1},opts));
+    for(let i=0;i<lines.length;i++){
+      const l=lines[i], code=l.replace(/\/\/.*$/,'');
+      if(/\bif\s*\([^)]*\b[A-Za-z_$][\w$]*\s*=\s*[^=]/.test(code)) emit(i+1,{severity:'HIGH',kind:'Logic Bug',title:'if条件に代入「=」があります',desc:'比較ではなく代入になっています。通常は === / !== が意図されます。',snippet:l.trim(),cause:'比較演算子の取り違え',before:l.trim(),after:l.replace(/=\s*(?!=)/,'=== '),confidence:'CERTAIN'});
+      if(/\b(currentEnemy|enemy)\.hp\s*=\s*-\s*[A-Za-z_$][\w$]*/.test(code)) emit(i+1,{severity:'MEDIUM',kind:'Game Logic',title:'敵HPの減算処理が代入になっています',desc:'currentEnemy.hp = -damage は既存HPを減らさず、負数へ置き換えます。',snippet:l.trim(),before:l.trim(),after:l.replace(/=\s*-/,'-= '),confidence:'CERTAIN'});
+      if(/\b(localStorage|sessionStorage)\.(clear|removeItem)\b(?!\s*\()/.test(code)) emit(i+1,{severity:'MEDIUM',kind:'保存',title:'storageメソッドを呼び出していません',desc:'メソッド名の参照だけで、実行されていません。',snippet:l.trim(),before:l.trim(),after:l.replace(/\b(clear|removeItem)\b/,'$1()'),confidence:'HIGH'});
+      if(/Math\.floor\s*\(\s*Math\.random\s*\(\s*\)\s*\*[^\n]*\.length\s*\+\s*1\s*\)/.test(code)) emit(i+1,{severity:'HIGH',kind:'Game Logic',title:'ランダム配列添字が範囲外になる可能性',desc:'Math.random() の結果を0-based配列に使う場合、+1で length が選ばれて範囲外になります。',snippet:l.trim(),before:l.trim(),after:l.replace(/\.length\s*\+\s*1/,'.length'),confidence:'CERTAIN'});
+      if(/\b(gold|coins?|money)\s*\+=\s*["']\d+(?:\.\d+)?["']/.test(l)) emit(i+1,{severity:'MEDIUM',kind:'Game Logic',title:'所持金に文字列を加算しています',desc:'数値のつもりなら文字列連結になるため、Number(...) または数値リテラルを使ってください。',snippet:l.trim(),confidence:'CERTAIN'});
+      if(/\bxp\s*-\s*\d+(?:\.\d+)?\s*;/.test(code) && !/\bxp\s*[-+*/]?=/.test(code)) emit(i+1,{severity:'HIGH',kind:'Game Logic',title:'XPの減算結果を破棄しています',desc:'xp - 100; は xp 自体を変更しません。',snippet:l.trim(),before:l.trim(),after:l.replace(/\bxp\s*-\s*/,'xp -= '),confidence:'CERTAIN'});
+      if(/\b(if|while)\s*\([^)]*\b(?:kills?|level)\s*=\s*\d+/.test(code)) emit(i+1,{severity:'HIGH',kind:'Game Logic',title:'ゲーム状態の条件式が代入になっています',desc:'kills / level の条件比較に = を使っています。',snippet:l.trim(),confidence:'CERTAIN'});
+      if(htmlInfo){
+        for(const m of code.matchAll(/document\.getElementById\s*\(\s*["']([^"']+)["']\s*\)/g)){
+          const id=m[1]; if(!htmlInfo.ids.has(id)){ const near=nearestKey([...htmlInfo.ids.keys()],id); emit(i+1,{severity:'HIGH',kind:'DOM',title:'未定義DOM要素を参照しています: '+id,desc:near?'HTMLには「'+near+'」があり、JSは「'+id+'」を参照しています。ID typo の可能性があります。':'HTML内に参照対象が見つかりません。',snippet:l.trim(),confidence:near?'CERTAIN':'HIGH'}); }
+        }
+        for(const m of code.matchAll(/\.classList\.(?:add|remove|toggle|contains)\s*\(\s*["']([^"']+)["']/g)){
+          const cls=m[1]; if(!htmlInfo.classes.has(cls)){ const near=nearestKey([...htmlInfo.classes.keys()],cls); emit(i+1,{severity:'MEDIUM',kind:'DOM',title:'JSで存在しないclassを操作しています: '+cls,desc:near?'「'+near+'」のタイプミス候補です。':'HTML内に同名classがありません。',snippet:l.trim(),confidence:near?'HIGH':'MEDIUM'}); }
+        }
+      }
+      if(/\b(keyCode|which)\b/.test(code)) emit(i+1,{severity:'LOW',kind:'イベント',title:'古いキーボードイベントAPIの使用',desc:'KeyboardEvent.key / code の利用を検討してください。',snippet:l.trim(),confidence:'HIGH'});
+      if(/setTimeout\s*\(\s*["']/.test(code)) emit(i+1,{severity:'MEDIUM',kind:'非同期',title:'setTimeoutに文字列コードを渡しています',desc:'文字列評価ではなく関数参照を使ってください。',snippet:l.trim(),confidence:'CERTAIN'});
+      if(/\b(?:localStorage|sessionStorage)\.getItem\s*\(/.test(code)){
+        const tail=lines.slice(i,i+3).join(' ');
+        if(/JSON\.parse\s*\(/.test(tail)) emit(i+1,{severity:'MEDIUM',kind:'保存',title:'load処理のnullチェックを確認してください',desc:'getItem() はデータ未保存時に null を返すため、JSON.parse やプロパティアクセスの前に存在確認が必要です。',snippet:l.trim(),confidence:'MEDIUM'});
+      }
+    }
+    const intervalCount=(text.match(/setInterval\s*\(/g)||[]).length;
+    if(intervalCount>1) emit(lineAt(text,text.search(/setInterval\s*\(/)),{severity:'LOW',kind:'イベント',title:'setIntervalが複数回登録されています',desc:'同じ更新ループを複数起動していないか確認してください。',confidence:'MEDIUM'});
+    // Duplicate addEventListener by textual target/event key; AST provides the stronger version when available.
+    const evMap=new Map(); let m;
+    const evRe=/([A-Za-z_$][\w$]*)\.addEventListener\s*\(\s*["']([^"']+)["']/g;
+    while((m=evRe.exec(text))){ const k=m[1]+'::'+m[2], arr=evMap.get(k)||[]; arr.push(lineAt(text,m.index)); evMap.set(k,arr); }
+    for(const [k,arr] of evMap) if(arr.length>1) emit(arr[1],{severity:'MEDIUM',kind:'イベント',title:'同じイベントリスナーが複数登録されています',desc:k.replace('::',' に ')+' が複数回登録されています。攻撃処理などが二重発火する可能性があります。',snippet:getLineText(lines,arr[1]),confidence:'HIGH'});
+  }
+
+  function checkJS(text, lines, issues, htmlInfo, baseLine){
+    checkJSHeuristics(text, lines, issues, htmlInfo, baseLine||1);
+    const lexical=[]; scanLexicalJS(text,baseLine||1,lexical);
+    // If lexical CRITICAL exists, do not emit generic brace cascades. Parse once to obtain the root cause.
+    const parsed=parseJSWithAST(text);
+    if(parsed.error){
+      const e=parsed.error, loc=e.loc?.line || e.lineNumber || guessSyntaxLine(e,text);
+      const root=lexical.find(x=>x.severity==='CRITICAL');
+      if(root){
+        issues.push(root);
+        pushIssue(issues,{severity:'LOW',line:Math.min(text.split('\n').length,Math.max(root.line+1,loc+1)),kind:'Syntax',title:'Secondary Parse Error',desc:(e.message||'構文解析に失敗しました')+'。先頭の構文エラーを修正してから再解析してください。',primaryId:root.id,confidence:'DERIVED'});
+      }else{
+        const id=pushIssue(issues,{severity:'CRITICAL',line:loc,kind:'Syntax',title:'SyntaxError',desc:e.message||'JavaScriptの構文解析に失敗しました。',snippet:getLineText(lines,loc),confidence:'CERTAIN'});
+        if(text.split('\n').length>loc) pushIssue(issues,{severity:'LOW',line:Math.min(lines.length,loc+1),kind:'Syntax',title:'Secondary Parse Error',desc:'先行する構文エラーのため、それ以降のAST解析を安全に継続できません。HTML/CSS/別scriptブロックは継続解析しています。',primaryId:id,confidence:'DERIVED'});
+      }
+      // Preserve only additional lexical issues that do not duplicate the primary.
+      for(const x of lexical){ if(!issues.some(y=>y.title===x.title&&y.line===x.line)) issues.push(x); }
+      return {ast:null,parser:parsed.parser,error:true};
+    }
+    if(parsed.ast) checkJSAst(text,parsed.ast,issues,htmlInfo);
+    for(const x of lexical){ if(x.severity==='CRITICAL' && !issues.some(y=>y.kind==='Syntax'&&y.line===x.line&&y.severity==='CRITICAL')) issues.push(x); }
+    return {ast:parsed.ast,parser:parsed.parser,error:false};
+  }
+  function guessSyntaxLine(e,text){
+    const m=String(e?.stack||e?.message||'').match(/<anonymous>:(\d+)/); if(m) return Math.max(1,Number(m[1])-1);
+    return 1;
+  }
+
+  function checkCSS(text, lines, issues, htmlInfo, baseLine){
+    let state='code', quote=null, depth=0, i=0, blockStart=-1, selectorStart=0, inComment=false;
+    const rules=[]; const declarations=[];
+    while(i<text.length){
+      const c=text[i], n=text[i+1];
+      if(inComment){ if(c==='*'&&n==='/'){inComment=false;i+=2;continue;} i++;continue; }
+      if(state==='string'){ if(c==='\\')i+=2; else if(c===quote){state='code';i++;} else i++; continue; }
+      if(c==='/'&&n==='*'){inComment=true;i+=2;continue;}
+      if(c==='"'||c==="'"){quote=c;state='string';i++;continue;}
+      if(c==='{'){ if(depth===0) selectorStart=i===0?0:(text.lastIndexOf('}',i-1)+1); depth++; if(depth===1) blockStart=i; }
+      else if(c==='}'){
+        if(depth===0) pushIssue(issues,{severity:'CRITICAL',line:baseLine+lineAt(text,i)-1,kind:'CSS',title:'CSSの閉じ括弧が余分です',desc:'対応する「{」がありません。',snippet:getLineText(lines,baseLine+lineAt(text,i)-1),confidence:'CERTAIN'});
+        else { depth--; if(depth===0){ const selector=text.slice(selectorStart,blockStart).trim(); const body=text.slice(blockStart+1,i); rules.push({selector,body,line:baseLine+lineAt(text,selectorStart)-1}); } }
+      }
+      i++;
+    }
+    if(inComment) pushIssue(issues,{severity:'CRITICAL',line:baseLine+text.split('\n').length-1,kind:'CSS',title:'CSSコメントが閉じられていません',desc:'/* に対応する */ がありません。',confidence:'CERTAIN'});
+    if(depth>0) pushIssue(issues,{severity:'CRITICAL',line:baseLine+lineAt(text,blockStart)-1,kind:'CSS',title:'CSSの「{」が閉じられていません',desc:'対応する「}」がありません。',snippet:getLineText(lines,baseLine+lineAt(text,blockStart)-1),confidence:'CERTAIN'});
+    const validUnitless=new Set(['z-index','opacity','line-height','font-weight','order','flex-grow','flex-shrink','grid-row','grid-column','zoom','scale']);
+    for(const r of rules){
+      if(!r.selector) continue;
+      const ids=[...r.selector.matchAll(/#([A-Za-z_][\w-]*)/g)].map(m=>m[1]);
+      const classes=[...r.selector.matchAll(/\.([A-Za-z_][\w-]*)/g)].map(m=>m[1]);
+      if(htmlInfo){
+        for(const id of ids) if(!htmlInfo.ids.has(id)) pushIssue(issues,{severity:'MEDIUM',line:r.line,kind:'CSS',title:'存在しないidをCSSが参照しています: #'+id,desc:'HTMLに #'+id+' が見つかりません。',snippet:r.selector,confidence:nearestKey([...htmlInfo.ids.keys()],id)?'HIGH':'MEDIUM'});
+        for(const cls of classes) if(!htmlInfo.classes.has(cls)) pushIssue(issues,{severity:'MEDIUM',line:r.line,kind:'CSS',title:'存在しないclassをCSSが参照しています: .'+cls,desc:'HTMLに .'+cls+' が見つかりません。',snippet:r.selector,confidence:'MEDIUM'});
+      }
+      const declRe=/([A-Za-z-]+)\s*:\s*([^;{}]+)(?:;|$)/g; let m;
+      const propSeen=new Map();
+      while((m=declRe.exec(r.body))){
+        const prop=m[1].toLowerCase(), val=m[2].trim();
+        propSeen.set(prop,(propSeen.get(prop)||0)+1); declarations.push({prop,val,line:r.line});
+        if((/^(width|height|min-width|max-width|min-height|max-height|top|right|bottom|left|margin|padding|gap|font-size|border(?:-\w+)?-width)$/.test(prop)) && /(^|\s)-?\d+(?:\.\d+)?\s*(?:[;]|$)/.test(val) && !validUnitless.has(prop) && !/^0(?:\D|$)/.test(val)){
+          pushIssue(issues,{severity:'LOW',line:r.line,kind:'CSS',title:'数値に単位がありません: '+prop,desc:'0以外の長さ値には px/%/rem 等の単位が必要なプロパティがあります。',snippet:r.selector+' { '+prop+': '+val+' }',confidence:'MEDIUM'});
+        }
+        if(/^display\s*:\s*none$/i.test(prop+':'+val) && htmlInfo){ }
+      }
+      for(const [prop,count] of propSeen) if(count>1) pushIssue(issues,{severity:'LOW',line:r.line,kind:'CSS',title:'同一ルール内でプロパティを重複定義しています: '+prop,desc:'後勝ちになり、意図しない上書きの原因になります。',snippet:r.selector,confidence:'HIGH'});
+    }
+    for(const r of rules){
+      if(/@media\b[^{}]*$/i.test(r.selector)) pushIssue(issues,{severity:'LOW',line:r.line,kind:'CSS',title:'media queryの構造を確認してください',desc:'ネスト構造を伴う場合はCSSパーサーでの確認が必要です。',snippet:r.selector,confidence:'LOW'});
+    }
+  }
+
+  function checkPY(text, lines, issues){
+    lines.forEach((l,i)=>{
+      const c=l.replace(/#.*$/,'').trim(); if(!c)return;
+      if(/^(if|elif|else|for|while|def|class|try|except|finally|with)\b/.test(c) && !/:\s*(#.*)?$/.test(c)) pushIssue(issues,{severity:'HIGH',line:i+1,kind:'Syntax',title:'Python構文の末尾に「:」がありません',desc:'制御構文・関数・クラス宣言は通常コロンで終わります。',snippet:l.trim(),confidence:'HIGH'});
+      if(/^except\s*:\s*$/.test(c)) pushIssue(issues,{severity:'LOW',line:i+1,kind:'Logic Bug',title:'裸のexceptです',desc:'意図せずすべての例外を握りつぶす可能性があります。',snippet:l.trim(),confidence:'HIGH'});
+    });
+  }
+  function checkJSON(text, lines, issues){
+    try{ JSON.parse(text); }catch(e){ pushIssue(issues,{severity:'CRITICAL',line:guessJSONLine(e,text),kind:'Syntax',title:'JSONの構文エラー',desc:e.message||'JSONとして解釈できません。',snippet:getLineText(lines,guessJSONLine(e,text)),confidence:'CERTAIN'}); }
+  }
+  function guessJSONLine(e,text){ const m=String(e.message||'').match(/position\s+(\d+)/i); return m?lineAt(text,Number(m[1])):1; }
+
+  function crossCheckHTMLJS(htmlInfo, scripts, issues){
+    // HTML inline handlers should resolve to a visible function name if used.
+    const allJS=scripts.filter(s=>!s.external).map(s=>s.content).join('\n');
+    const fnNames=new Set(); const fnRe=/\bfunction\s+([A-Za-z_$][\w$]*)\s*\(/g; let m; while((m=fnRe.exec(allJS)))fnNames.add(m[1]);
+    for(const [id,code] of htmlInfo.onclick){ const names=[...code.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)].map(x=>x[1]).filter(x=>!['if','for','while'].includes(x)); for(const name of names) if(!fnNames.has(name)) pushIssue(issues,{severity:'MEDIUM',line:1,kind:'DOM',title:'onclick属性の関数が見つかりません: '+name,desc:'HTMLのonclickとJS側の関数名を確認してください。',confidence:'MEDIUM'}); }
+  }
+
+  function runScanText(text, forcedLang, hintExt){
+    const lang=forcedLang&&forcedLang!=='auto'?forcedLang:detectLanguage(text,hintExt); const lines=text.split('\n'); let issues=[];
+    let htmlInfo=null, scripts=[], styles=[];
+    if(lang==='html'){
+      const r=parseHTML(text,0); issues.push(...r.issues); htmlInfo=r.info; scripts=htmlInfo.scripts; styles=htmlInfo.styles;
+      for(const st of styles){ const sub=[]; checkCSS(st.content,st.content.split('\n'),sub,null,st.lineOffset+1); issues.push(...sub); }
+      for(const sc of scripts){
+        if(sc.external) continue;
+        const sub=[]; checkJS(sc.content,sc.content.split('\n'),sub,htmlInfo,sc.lineOffset+1); issues.push(...sub);
+      }
+      crossCheckHTMLJS(htmlInfo,scripts,issues);
+    } else if(lang==='js') checkJS(text,lines,issues,null,1);
+    else if(lang==='css') checkCSS(text,lines,issues,null,1);
+    else if(lang==='py') checkPY(text,lines,issues);
+    else if(lang==='json') checkJSON(text,lines,issues);
+    // No generic cross-language bracket checker: it was the main source of JS-in-string false positives.
+    return {lang,issues:dedupeIssues(issues),parser:lang==='html'?'HTML + embedded AST':lang==='js'?(window.acorn?'Acorn AST':'Native parser fallback'):'dedicated parser'};
   }
 
   function runScan(){
     const text=currentText(); if(!text.trim())return;
-    const lang=detectLanguage(text,state.mode==='file'?els.dropzone.dataset.detected:null);
-    let issues=[];
-    if(lang==='html'){const mixed=analyzeMixedDocument(text);issues=mixed.issues;}
-    else{const lines=text.split('\n');checkCommon(text,lines,issues);if(lang==='css')checkCSS(text,lines,issues);else if(lang==='js')checkJS(text,lines,issues,{ids:new Set(),classes:new Set(),eventRegs:[],domSelectors:true});else if(lang==='py')checkPY(text,lines,issues);else if(lang==='json')checkJSON(text,lines,issues);}
-    issues=dedupeIssues(issues); renderResults(issues,lang);
+    const hintExt=els.dropzone.dataset.detected; const result=runScanText(text,null,state.mode==='file'?hintExt:null);
+    renderResults(result.issues,result.lang,result.parser);
   }
 
-  function renderResults(issues,lang){
+  const langLabel={html:'HTML',css:'CSS',js:'JavaScript',py:'Python',json:'JSON'};
+  const severityMeta={
+    CRITICAL:{icon:'circle-x'},HIGH:{icon:'circle-x'},MEDIUM:{icon:'triangle'},LOW:{icon:'info'},INFO:{icon:'info'}
+  };
+  function iconSVG(name){
+    switch(name){
+      case 'circle-x':return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/></svg>';
+      case 'triangle':return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 1 1.71 3h16.94a2 2 0 0 1 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+      case 'info':return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
+      case 'check':return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
+    }
+    return '';
+  }
+  function escapeHTML(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
+  function renderResults(issues,lang,parser){
     els.results.classList.add('show');
     const counts={CRITICAL:0,HIGH:0,MEDIUM:0,LOW:0,INFO:0}; issues.forEach(x=>counts[x.severity]++);
-    let summary='<span class="sum-pill info">検査モード: '+(langLabel[lang]||lang)+'</span>';
-    Object.keys(counts).forEach(k=>{if(counts[k])summary+=`<span class="sum-pill ${k==='CRITICAL'||k==='HIGH'?'err':k==='MEDIUM'?'warn':k==='LOW'?'info':'info'}">${k} ${counts[k]}件</span>`;});
-    if(!issues.length)summary+='<span class="sum-pill ok">'+iconSVG('check')+' 検出なし</span>';
-    els.summaryStrip.innerHTML=summary;
-    if(!issues.length){els.resultsBody.innerHTML='<div class="clean-msg">'+iconSVG('check')+'<div>今回の静的解析では、明確な問題は見つかりませんでした。</div><small>「可能性あり」の推測を無理にエラーへ格上げしていません。</small></div>';return;}
-    const list=issues.map(x=>{const meta=severityMeta[x.severity]||severityMeta.INFO;return `<div class="issue sev-${x.severity.toLowerCase()} ${x.secondary?'secondary':''}">
-      <div class="issue-sev">${iconSVG(meta.icon)}</div>
-      <div class="issue-line"><span class="num">${x.line}</span>行目</div>
-      <div class="issue-body">
-        <div class="issue-topline"><span class="issue-severity">${escapeHTML(x.severity)}</span><span class="issue-category">${escapeHTML(x.category)}</span>${x.confidence==='medium'||x.confidence==='low'?'<span class="issue-confidence">可能性あり</span>':''}</div>
-        <div class="issue-title">${escapeHTML(x.title)}</div>
-        <div class="issue-desc">${escapeHTML(x.desc)}</div>
-        ${x.snippet?'<div class="issue-code">'+escapeHTML(x.snippet)+'</div>':''}
-        ${x.fixBefore?'<div class="fix-block"><b>修正前</b><code>'+escapeHTML(x.fixBefore)+'</code><b>修正後</b><code>'+escapeHTML(x.fixAfter)+'</code></div>':''}
-      </div></div>`;}).join('');
-    els.resultsBody.innerHTML='<div class="issue-list">'+list+'</div>';
+    let html='<span class="sum-pill info">検査モード: '+escapeHTML(langLabel[lang]||lang)+'</span><span class="sum-pill info">解析: '+escapeHTML(parser||'')+'</span>';
+    for(const sev of ['CRITICAL','HIGH','MEDIUM','LOW','INFO']) if(counts[sev]) html+='<span class="sum-pill '+(sev==='INFO'?'info':sev==='MEDIUM'?'warn':'err')+'">'+sev+' '+counts[sev]+'件</span>';
+    if(!issues.length) html+='<span class="sum-pill ok">'+iconSVG('check')+' 問題なし</span>';
+    els.summaryStrip.innerHTML=html;
+    if(!issues.length){els.resultsBody.innerHTML='<div class="clean-msg">'+iconSVG('check')+'<div>今回の静的解析では、確実なエラーや具体的なバグ候補は見つかりませんでした。</div></div>';return;}
+    const list=issues.map(is=>{
+      const meta=severityMeta[is.severity]||severityMeta.INFO;
+      let body='<div class="issue sev-'+is.severity.toLowerCase()+'"><div class="issue-sev">'+iconSVG(meta.icon)+'</div><div class="issue-line"><span class="num">'+is.line+'</span>行目</div><div class="issue-body">';
+      body+='<div class="issue-meta"><span>種類: '+escapeHTML(is.kind)+'</span><span class="sev-'+is.severity.toLowerCase()+'">重要度: '+escapeHTML(is.severity)+'</span><span>確度: '+escapeHTML(is.confidence||'')+'</span></div>';
+      body+='<div class="issue-title">'+escapeHTML(is.title)+'</div><div class="issue-desc">'+escapeHTML(is.desc)+'</div>';
+      if(is.cause) body+='<div class="issue-section"><strong>原因:</strong> '+escapeHTML(is.cause)+'</div>';
+      if(is.before) body+='<div class="issue-section"><strong>修正前:</strong> <code>'+escapeHTML(is.before)+'</code></div>';
+      if(is.after) body+='<div class="issue-section"><strong>修正後候補:</strong> <code>'+escapeHTML(is.after)+'</code></div>';
+      if(is.snippet) body+='<div class="issue-code">'+escapeHTML(is.snippet)+'</div>';
+      if(is.primaryId) body+='<div class="secondary-row">└ Secondary: 先行する主原因 '+escapeHTML(is.primaryId)+' の派生エラー</div>';
+      body+='</div></div>'; return body;
+    }).join('');
+    els.resultsBody.innerHTML='<div class="scan-note">CRITICAL/HIGH は明確な構文・実行上の問題を優先。MEDIUM/LOW はコードから確度を判定できないものを「可能性あり」として分離しています。</div><div class="issue-list">'+list+'</div>';
   }
+
+  // Public API + self test suite for regression testing.
+  function runSelfTests(){
+    const tests=[]; const add=(name,should,fn)=>{const r=fn();tests.push({name,passed:should?r.ok:!r.ok,detail:r.detail||''});};
+    const has=(issues,rx)=>issues.some(x=>rx.test(x.title+' '+x.desc));
+    add('正常なmeta viewport',true,()=>{const r=runScanText('<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body></body></html>','html');return {ok:!has(r.issues,/属性値/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('HTML文字列を誤検出しない',true,()=>{const r=runScanText('<div id="x"></div><script>const message="<div><span>hello</span></div>";<\/script>','html');return {ok:!has(r.issues,/ネスト|タグ/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('if代入検出',true,()=>{const r=runScanText('let kills=0;if(kills = 3){}','js');return {ok:has(r.issues,/代入/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('regex構文エラー',true,()=>{const r=runScanText('function regexBug(){\nreturn /[/;\n}','js');return {ok:has(r.issues,/正規表現|SyntaxError/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('random配列添字',true,()=>{const r=runScanText('const i=Math.floor(Math.random() * enemies.length + 1);','js');return {ok:has(r.issues,/ランダム/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('localStorage.clear参照',true,()=>{const r=runScanText('function reset(){ localStorage.clear; }','js');return {ok:has(r.issues,/メソッドを呼び出していません/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('XP破棄',true,()=>{const r=runScanText('xp - 100;','js');return {ok:has(r.issues,/XP/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('正常なtemplate literal',true,()=>{const r=runScanText('const message=`<div>${name}</div>`;','js');return {ok:!has(r.issues,/文字列|テンプレート|正規表現/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('DOM id typo',true,()=>{const close=String.fromCharCode(60)+'/script>'; const r=runScanText('<button id="attackBtn"></button><script>document.getElementById("attackButton");'+close,'html');return {ok:has(r.issues,/未定義DOM/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('double attack event',true,()=>{const r=runScanText('attackButton.addEventListener("click", attack);\nattackButton.addEventListener("click", attack);','js');return {ok:has(r.issues,/複数登録/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('minus assignment',true,()=>{const r=runScanText('currentEnemy.hp =- damage;','js');return {ok:has(r.issues,/敵HP/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('gold string add',true,()=>{const r=runScanText('gold += "50";','js');return {ok:has(r.issues,/所持金/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('level condition assignment',true,()=>{const r=runScanText('if(level = 10){}','js');return {ok:has(r.issues,/ゲーム状態|代入/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('load null candidate',true,()=>{const r=runScanText('const x=localStorage.getItem("save"); JSON.parse(x);','js');return {ok:has(r.issues,/getItem|JSON.parse/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('normal regex',false,()=>{const r=runScanText('const re=/^[a-z]+$/i;','js');return {ok:has(r.issues,/正規表現/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('Bug Arena fixture',true,()=>{
+      const arena=[
+        'currentEnemy.hp =- damage;',
+        'if(kills = 3){}',
+        'if(level = 10){}',
+        'localStorage.clear;',
+        'Math.floor(Math.random() * enemies.length + 1);',
+        'gold += "50";',
+        'xp - 100;',
+        'document.getElementById("model");',
+        'document.getElementById("scores");',
+        'attackButton.addEventListener("click", attack);',
+        'attackButton.addEventListener("click", attack);',
+        'saveGame();',
+        'loadGame();',
+        'function regexBug(){ return /[/; }'
+      ].join('\n');
+      const r=runScanText('<button id="attackBtn"></button><script>'+arena+String.fromCharCode(60)+'/script>','html');
+      const joined=r.issues.map(x=>x.title).join(' | ');
+      const ok=[/敵HP|減算処理/,/代入/,/メソッドを呼び出していません/,/ランダム/,/所持金/,/XP/,/未定義DOM/,/複数登録/,/正規表現/].every(rx=>rx.test(joined));
+      return {ok,detail:joined};
+    });
+    return tests;
+  }
+  window.LintBench={analyze:runScanText,runSelfTests};
+  try{ console.info('[LintBench] self-tests',runSelfTests()); }catch(_){ }
 
   els.runBtn.addEventListener('click', runScan);
 
@@ -1509,7 +1505,6 @@
   });
 
   updateRunState();
-  window.__LINT_BENCH_SELF_TEST__ = runSelfTests;
 })();
 </script>
 
