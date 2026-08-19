@@ -1,0 +1,1517 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>コード検査室 / Lint Bench</title>
+<style>
+  :root{
+    --bg-0:#0b0d10;
+    --bg-1:#111417;
+    --bg-2:#161a1f;
+    --bg-3:#1d2228;
+    --line:#262c33;
+    --line-soft:#1c2126;
+    --text-hi:#eef1f4;
+    --text-mid:#a7b0ba;
+    --text-lo:#5d6772;
+    --accent:#5ee6b0;
+    --accent-dim:#2f7a5e;
+    --warn:#f2b84b;
+    --warn-dim:#7a5f22;
+    --err:#f2604f;
+    --err-dim:#7a3128;
+    --info:#5ea8f2;
+    --info-dim:#295377;
+    --mono:"JetBrains Mono","IBM Plex Mono","SFMono-Regular",Consolas,"Liberation Mono",monospace;
+    --sans:"IBM Plex Sans JP","Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif;
+    --radius:3px;
+  }
+
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg-0);
+    color:var(--text-hi);
+    font-family:var(--sans);
+    min-height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* ---------- 背景の罫線グリッド ---------- */
+  .grid-backdrop{
+    position:fixed;
+    inset:0;
+    pointer-events:none;
+    z-index:0;
+    background-image:
+      linear-gradient(var(--line-soft) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
+    background-size:64px 64px;
+    opacity:.35;
+    mask-image:radial-gradient(ellipse 80% 60% at 50% 0%, black 40%, transparent 90%);
+  }
+
+  .shell{
+    position:relative;
+    z-index:1;
+    max-width:1180px;
+    margin:0 auto;
+    padding:36px 24px 80px;
+  }
+
+  /* ---------- ヘッダー ---------- */
+  header.top{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-end;
+    gap:24px;
+    border-bottom:1px solid var(--line);
+    padding-bottom:22px;
+    margin-bottom:28px;
+    flex-wrap:wrap;
+  }
+  .brand-mark{
+    display:flex;
+    align-items:baseline;
+    gap:14px;
+  }
+  .brand-mark .glyph{
+    font-family:var(--mono);
+    font-size:13px;
+    color:var(--bg-0);
+    background:var(--accent);
+    padding:3px 7px;
+    border-radius:2px;
+    letter-spacing:.02em;
+    transform:translateY(-2px);
+  }
+  h1{
+    font-size:26px;
+    font-weight:700;
+    margin:0;
+    letter-spacing:-.01em;
+  }
+  h1 .en{
+    font-family:var(--mono);
+    font-weight:500;
+    color:var(--text-lo);
+    font-size:14px;
+    margin-left:10px;
+    letter-spacing:0;
+  }
+  .subline{
+    color:var(--text-mid);
+    font-size:13.5px;
+    margin-top:6px;
+    max-width:56ch;
+    line-height:1.6;
+  }
+  .lang-chips{
+    display:flex;
+    gap:6px;
+    flex-wrap:wrap;
+    justify-content:flex-end;
+    max-width:320px;
+  }
+  .chip{
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--text-lo);
+    border:1px solid var(--line);
+    padding:3px 8px;
+    border-radius:20px;
+    background:var(--bg-1);
+  }
+
+  /* ---------- 入力方式タブ ---------- */
+  .mode-row{
+    display:flex;
+    gap:8px;
+    margin-bottom:14px;
+  }
+  .mode-btn{
+    font-family:var(--sans);
+    font-size:13px;
+    font-weight:600;
+    color:var(--text-mid);
+    background:var(--bg-1);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:9px 16px;
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    gap:8px;
+    transition:border-color .15s ease, color .15s ease, background .15s ease;
+  }
+  .mode-btn svg{width:15px;height:15px;flex:none;opacity:.8;}
+  .mode-btn:hover{border-color:var(--text-lo); color:var(--text-hi);}
+  .mode-btn.active{
+    color:var(--bg-0);
+    background:var(--accent);
+    border-color:var(--accent);
+  }
+  .mode-btn.active svg{opacity:1;}
+
+  /* ---------- 言語セレクタ ---------- */
+  .lang-select-wrap{
+    margin-left:auto;
+    display:flex;
+    align-items:center;
+    gap:10px;
+    font-size:12.5px;
+    color:var(--text-lo);
+  }
+  select#langSelect{
+    font-family:var(--mono);
+    font-size:12.5px;
+    color:var(--text-hi);
+    background:var(--bg-1);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:7px 10px;
+    cursor:pointer;
+  }
+  select#langSelect:focus-visible, .mode-btn:focus-visible, button:focus-visible, textarea:focus-visible, .dropzone:focus-visible{
+    outline:2px solid var(--accent);
+    outline-offset:2px;
+  }
+
+  .mode-row-outer{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    flex-wrap:wrap;
+    margin-bottom:14px;
+  }
+
+  /* ---------- パネル共通 ---------- */
+  .panel{
+    background:var(--bg-1);
+    border:1px solid var(--line);
+    border-radius:6px;
+    overflow:hidden;
+  }
+  .panel-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:11px 16px;
+    border-bottom:1px solid var(--line);
+    background:var(--bg-2);
+  }
+  .panel-head .ptitle{
+    font-family:var(--mono);
+    font-size:12px;
+    color:var(--text-mid);
+    letter-spacing:.03em;
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .dot-row{display:flex;gap:5px;}
+  .dot-row span{width:8px;height:8px;border-radius:50%;background:var(--line);}
+
+  /* ---------- ドロップゾーン ---------- */
+  .dropzone{
+    padding:46px 24px;
+    text-align:center;
+    cursor:pointer;
+    transition:background .15s ease, border-color .15s ease;
+    border:1px dashed transparent;
+    margin:14px;
+    border-radius:5px;
+  }
+  .dropzone:hover, .dropzone.drag{
+    background:var(--bg-2);
+    border-color:var(--accent-dim);
+  }
+  .dropzone svg{width:34px;height:34px;color:var(--text-lo);margin-bottom:14px;}
+  .dropzone .dz-title{font-size:14.5px;font-weight:600;color:var(--text-hi);margin-bottom:5px;}
+  .dropzone .dz-sub{font-size:12.5px;color:var(--text-lo);}
+  .dropzone .dz-sub .accent{color:var(--accent);}
+  input[type=file]{display:none;}
+
+  .file-badge{
+    display:none;
+    margin:14px;
+    padding:10px 14px;
+    background:var(--bg-2);
+    border:1px solid var(--line);
+    border-radius:5px;
+    font-family:var(--mono);
+    font-size:12.5px;
+    color:var(--text-mid);
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+  }
+  .file-badge.show{display:flex;}
+  .file-badge .fname{color:var(--accent); word-break:break-all;}
+  .file-badge button{
+    background:transparent;
+    border:none;
+    color:var(--text-lo);
+    cursor:pointer;
+    font-size:12px;
+    font-family:var(--sans);
+    text-decoration:underline;
+    flex:none;
+  }
+  .file-badge button:hover{color:var(--err);}
+
+  textarea#codeInput{
+    width:100%;
+    min-height:340px;
+    background:transparent;
+    border:none;
+    color:var(--text-hi);
+    font-family:var(--mono);
+    font-size:13px;
+    line-height:1.65;
+    padding:16px;
+    resize:vertical;
+    tab-size:2;
+  }
+  textarea#codeInput::placeholder{color:var(--text-lo);}
+
+  /* ---------- 実行バー ---------- */
+  .run-bar{
+    display:flex;
+    align-items:center;
+    gap:14px;
+    margin:18px 0 8px;
+    flex-wrap:wrap;
+  }
+  #runBtn{
+    font-family:var(--sans);
+    font-weight:700;
+    font-size:14px;
+    color:var(--bg-0);
+    background:var(--accent);
+    border:none;
+    border-radius:var(--radius);
+    padding:12px 22px;
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    gap:9px;
+    transition:filter .15s ease, transform .1s ease;
+  }
+  #runBtn:hover{filter:brightness(1.08);}
+  #runBtn:active{transform:translateY(1px);}
+  #runBtn:disabled{background:var(--bg-3); color:var(--text-lo); cursor:not-allowed;}
+  #runBtn svg{width:15px;height:15px;}
+
+  .run-meta{
+    font-family:var(--mono);
+    font-size:12px;
+    color:var(--text-lo);
+  }
+  .run-meta strong{color:var(--text-mid); font-weight:600;}
+
+  /* ---------- 結果セクション ---------- */
+  section#results{
+    margin-top:34px;
+    display:none;
+  }
+  section#results.show{display:block;}
+
+  .results-head{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    flex-wrap:wrap;
+    gap:12px;
+    margin-bottom:16px;
+    padding-bottom:14px;
+    border-bottom:1px solid var(--line);
+  }
+  .results-head h2{
+    font-size:16px;
+    margin:0;
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .results-head h2 .en{
+    font-family:var(--mono);
+    font-size:11.5px;
+    color:var(--text-lo);
+    font-weight:500;
+  }
+
+  .summary-strip{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+  }
+  .sum-pill{
+    font-family:var(--mono);
+    font-size:12px;
+    padding:5px 11px;
+    border-radius:20px;
+    display:flex;
+    align-items:center;
+    gap:6px;
+    border:1px solid var(--line);
+  }
+  .sum-pill.err{color:var(--err); border-color:var(--err-dim); background:rgba(242,96,79,.07);}
+  .sum-pill.warn{color:var(--warn); border-color:var(--warn-dim); background:rgba(242,184,75,.07);}
+  .sum-pill.info{color:var(--info); border-color:var(--info-dim); background:rgba(94,168,242,.07);}
+  .sum-pill.ok{color:var(--accent); border-color:var(--accent-dim); background:rgba(94,230,176,.07);}
+
+  .clean-msg{
+    padding:44px 20px;
+    text-align:center;
+    color:var(--text-mid);
+    font-size:14px;
+  }
+  .clean-msg svg{width:32px;height:32px;color:var(--accent);margin-bottom:14px;}
+
+  /* ---------- issue カード ---------- */
+  .issue-list{
+    display:flex;
+    flex-direction:column;
+    gap:1px;
+    background:var(--line);
+    border:1px solid var(--line);
+    border-radius:6px;
+    overflow:hidden;
+  }
+  .issue{
+    background:var(--bg-1);
+    padding:14px 16px;
+    display:grid;
+    grid-template-columns:34px 64px 1fr;
+    gap:14px;
+    align-items:start;
+  }
+  .issue-sev{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding-top:2px;
+  }
+  .issue-sev svg{width:17px;height:17px;}
+  .issue.sev-critical .issue-sev svg,.issue.sev-high .issue-sev svg{color:var(--err);}
+  .issue.sev-medium .issue-sev svg{color:var(--warn);}
+  .issue.sev-low .issue-sev svg,.issue.sev-info .issue-sev svg{color:var(--info);}
+
+  .issue-line{
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--text-lo);
+    padding-top:3px;
+  }
+  .issue-line .num{
+    display:block;
+    color:var(--text-mid);
+    font-size:13px;
+    font-weight:700;
+  }
+  .issue-body .issue-title{
+    font-size:13.5px;
+    font-weight:600;
+    color:var(--text-hi);
+    margin-bottom:4px;
+  }
+  .issue-body .issue-desc{
+    font-size:12.5px;
+    color:var(--text-mid);
+    line-height:1.6;
+    margin-bottom:8px;
+  }
+  .issue-body .issue-code{
+    font-family:var(--mono);
+    font-size:12px;
+    background:var(--bg-0);
+    border:1px solid var(--line);
+    border-radius:4px;
+    padding:8px 11px;
+    color:var(--text-mid);
+    overflow-x:auto;
+    white-space:pre;
+  }
+  .issue-body .issue-code .mark{
+    background:rgba(242,96,79,.18);
+    border-bottom:1px solid var(--err);
+  }
+  .issue-tag{
+    display:inline-block;
+    font-family:var(--mono);
+    font-size:10px;
+    color:var(--text-lo);
+    border:1px solid var(--line);
+    padding:1px 6px;
+    border-radius:10px;
+    margin-top:8px;
+  }
+
+  footer.note{
+    margin-top:44px;
+    padding-top:18px;
+    border-top:1px solid var(--line);
+    font-size:11.5px;
+    color:var(--text-lo);
+    line-height:1.7;
+  }
+
+  .issue-topline{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-bottom:5px;}
+  .issue-severity,.issue-category,.issue-confidence{font-family:var(--mono);font-size:9.5px;border:1px solid var(--line);border-radius:10px;padding:2px 6px;color:var(--text-lo);}
+  .issue.sev-critical .issue-severity,.issue.sev-high .issue-severity{color:var(--err);border-color:var(--err-dim);}
+  .issue.sev-medium .issue-severity{color:var(--warn);border-color:var(--warn-dim);}
+  .issue.sev-low .issue-severity,.issue.sev-info .issue-severity{color:var(--info);border-color:var(--info-dim);}
+  .issue-confidence{color:var(--warn);border-color:var(--warn-dim);}
+  .issue.secondary{background:rgba(94,168,242,.025);}
+  .fix-block{display:grid;grid-template-columns:70px 1fr;gap:6px 10px;margin-top:9px;font-size:11px;}
+  .fix-block b{color:var(--text-lo);font-weight:600;}
+  .fix-block code{font-family:var(--mono);white-space:pre-wrap;color:var(--text-mid);background:var(--bg-0);border:1px solid var(--line);padding:6px 8px;border-radius:4px;}
+  .clean-msg small{display:block;margin-top:8px;color:var(--text-lo);}
+
+  @media (max-width: 720px){
+    .shell{padding:24px 16px 60px;}
+    header.top{flex-direction:column; align-items:flex-start;}
+    .lang-chips{justify-content:flex-start; max-width:none;}
+    .issue{grid-template-columns:24px 1fr; }
+    .issue-line{display:none;}
+    .mode-row-outer{gap:8px;}
+    .lang-select-wrap{margin-left:0; width:100%;}
+    select#langSelect{flex:1;}
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    *{transition:none !important;}
+  }
+</style>
+</head>
+<body>
+
+<div class="grid-backdrop" aria-hidden="true"></div>
+
+<div class="shell">
+
+  <header class="top">
+    <div>
+      <div class="brand-mark">
+        <span class="glyph">&lt;/&gt;</span>
+        <h1>コード検査室<span class="en">LINT BENCH — static review</span></h1>
+      </div>
+      <p class="subline">HTML・CSS・JavaScript・Python・JSON のコードを貼り付けるか .txt / ソースファイルをアップロードすると、よくある構文ミスや不具合の兆候をブラウザ内だけで検査します。</p>
+    </div>
+    <div class="lang-chips" aria-hidden="true">
+      <span class="chip">HTML</span>
+      <span class="chip">CSS</span>
+      <span class="chip">JavaScript</span>
+      <span class="chip">Python</span>
+      <span class="chip">JSON</span>
+    </div>
+  </header>
+
+  <div class="mode-row-outer">
+    <div class="mode-row" role="tablist" aria-label="入力方法の切り替え">
+      <button class="mode-btn active" id="tabPaste" role="tab" aria-selected="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3"/><rect x="9" y="2" width="6" height="4" rx="1"/></svg>
+        テキストを貼り付け
+      </button>
+      <button class="mode-btn" id="tabFile" role="tab" aria-selected="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+        ファイルをアップロード (.txt)
+      </button>
+    </div>
+
+    <div class="lang-select-wrap">
+      <label for="langSelect">検査モード:</label>
+      <select id="langSelect">
+        <option value="auto">自動判定</option>
+        <option value="html">HTML</option>
+        <option value="css">CSS</option>
+        <option value="js">JavaScript</option>
+        <option value="py">Python</option>
+        <option value="json">JSON</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- ペースト入力パネル -->
+  <div class="panel" id="pastePanel">
+    <div class="panel-head">
+      <span class="ptitle">
+        <span class="dot-row"><span></span><span></span><span></span></span>
+        input.code
+      </span>
+      <span class="ptitle" id="lineCount">0 行 / 0 文字</span>
+    </div>
+    <textarea id="codeInput" placeholder="ここにコードを貼り付けてください… &#10;&#10;例:&#10;function greet(name) {&#10;  if (name = null) {&#10;    console.log('hello')&#10;  }&#10;}"></textarea>
+  </div>
+
+  <!-- ファイル入力パネル -->
+  <div class="panel" id="filePanel" style="display:none;">
+    <div class="panel-head">
+      <span class="ptitle">
+        <span class="dot-row"><span></span><span></span><span></span></span>
+        upload.file
+      </span>
+    </div>
+    <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="ファイルを選択またはドラッグ&ドロップ">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+      <div class="dz-title">クリックして選択、またはドラッグ&ドロップ</div>
+      <div class="dz-sub">対応: <span class="accent">.txt</span> / .html / .css / .js / .py / .json（テキスト形式のみ・最大 2MB）</div>
+    </div>
+    <input type="file" id="fileInput" accept=".txt,.html,.htm,.css,.js,.jsx,.py,.json">
+    <div class="file-badge" id="fileBadge">
+      <span>読み込み済み: <span class="fname" id="fnameDisplay"></span></span>
+      <button id="clearFileBtn" type="button">クリア</button>
+    </div>
+  </div>
+
+  <div class="run-bar">
+    <button id="runBtn" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M8 5v14l11-7z"/></svg>
+      検査を実行する
+    </button>
+    <span class="run-meta" id="runMeta">コードを入力すると実行できます</span>
+  </div>
+
+  <section id="results">
+    <div class="results-head">
+      <h2>検査結果 <span class="en">SCAN RESULT</span></h2>
+      <div class="summary-strip" id="summaryStrip"></div>
+    </div>
+    <div id="resultsBody"></div>
+  </section>
+
+  <footer class="note">
+    ※ HTML/CSS/JavaScriptは言語ごとに分離して解析します。JavaScriptはAcorn ASTが利用できる場合はAST解析を優先し、構文エラー時は安全な範囲だけ再解析します。外部パーサーはCDNから読み込みますが、コード本文は外部へ送信しません。パーサーを読み込めない場合は誤検出を抑えた字句フォールバックに切り替えます。
+  </footer>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/acorn@8.18.0/dist/acorn.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/acorn-loose@8.5.2/dist/acorn-loose.js"></script>
+<script>
+(function(){
+  "use strict";
+
+  const els = {
+    tabPaste: document.getElementById('tabPaste'),
+    tabFile: document.getElementById('tabFile'),
+    pastePanel: document.getElementById('pastePanel'),
+    filePanel: document.getElementById('filePanel'),
+    codeInput: document.getElementById('codeInput'),
+    lineCount: document.getElementById('lineCount'),
+    dropzone: document.getElementById('dropzone'),
+    fileInput: document.getElementById('fileInput'),
+    fileBadge: document.getElementById('fileBadge'),
+    fnameDisplay: document.getElementById('fnameDisplay'),
+    clearFileBtn: document.getElementById('clearFileBtn'),
+    langSelect: document.getElementById('langSelect'),
+    runBtn: document.getElementById('runBtn'),
+    runMeta: document.getElementById('runMeta'),
+    results: document.getElementById('results'),
+    summaryStrip: document.getElementById('summaryStrip'),
+    resultsBody: document.getElementById('resultsBody'),
+  };
+
+  let state = {
+    mode: 'paste',   // paste | file
+    fileText: '',
+    fileName: '',
+  };
+
+  /* ---------------- タブ切替 ---------------- */
+  function setMode(mode){
+    state.mode = mode;
+    els.tabPaste.classList.toggle('active', mode === 'paste');
+    els.tabFile.classList.toggle('active', mode === 'file');
+    els.tabPaste.setAttribute('aria-selected', mode === 'paste');
+    els.tabFile.setAttribute('aria-selected', mode === 'file');
+    els.pastePanel.style.display = mode === 'paste' ? '' : 'none';
+    els.filePanel.style.display = mode === 'file' ? '' : 'none';
+    updateRunState();
+  }
+  els.tabPaste.addEventListener('click', () => setMode('paste'));
+  els.tabFile.addEventListener('click', () => setMode('file'));
+
+  /* ---------------- 文字数カウント ---------------- */
+  els.codeInput.addEventListener('input', () => {
+    const v = els.codeInput.value;
+    const lines = v.length ? v.split('\n').length : 0;
+    els.lineCount.textContent = lines + ' 行 / ' + v.length + ' 文字';
+    updateRunState();
+  });
+
+  /* ---------------- ファイル読み込み ---------------- */
+  function readFile(file){
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024){
+      alert('ファイルサイズが大きすぎます（上限 2MB）。');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      state.fileText = e.target.result;
+      state.fileName = file.name;
+      els.fnameDisplay.textContent = file.name + '  (' + formatBytes(file.size) + ')';
+      els.fileBadge.classList.add('show');
+      autoDetectFromName(file.name);
+      updateRunState();
+    };
+    reader.onerror = () => alert('ファイルの読み込みに失敗しました。テキスト形式のファイルを指定してください。');
+    reader.readAsText(file, 'UTF-8');
+  }
+
+  function formatBytes(n){
+    if (n < 1024) return n + ' B';
+    if (n < 1024*1024) return (n/1024).toFixed(1) + ' KB';
+    return (n/1024/1024).toFixed(2) + ' MB';
+  }
+
+  function autoDetectFromName(name){
+    const ext = (name.split('.').pop() || '').toLowerCase();
+    const map = { html:'html', htm:'html', css:'css', js:'js', jsx:'js', py:'py', json:'json' };
+    if (map[ext] && els.langSelect.value === 'auto'){
+      // ヒントとして保持のみ。ユーザーがセレクトを操作していなければ auto のまま解析側で使う
+      els.dropzone.dataset.detected = map[ext];
+    }
+  }
+
+  els.dropzone.addEventListener('click', () => els.fileInput.click());
+  els.dropzone.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); els.fileInput.click(); }
+  });
+  els.fileInput.addEventListener('change', (e) => readFile(e.target.files[0]));
+
+  ['dragenter','dragover'].forEach(evt => {
+    els.dropzone.addEventListener(evt, (e) => {
+      e.preventDefault(); e.stopPropagation();
+      els.dropzone.classList.add('drag');
+    });
+  });
+  ['dragleave','drop'].forEach(evt => {
+    els.dropzone.addEventListener(evt, (e) => {
+      e.preventDefault(); e.stopPropagation();
+      els.dropzone.classList.remove('drag');
+    });
+  });
+  els.dropzone.addEventListener('drop', (e) => {
+    const file = e.dataTransfer.files && e.dataTransfer.files[0];
+    readFile(file);
+  });
+
+  els.clearFileBtn.addEventListener('click', () => {
+    state.fileText = '';
+    state.fileName = '';
+    els.fileInput.value = '';
+    els.fileBadge.classList.remove('show');
+    delete els.dropzone.dataset.detected;
+    updateRunState();
+  });
+
+  /* ---------------- 実行可否 ---------------- */
+  function currentText(){
+    return state.mode === 'paste' ? els.codeInput.value : state.fileText;
+  }
+
+  function updateRunState(){
+    const has = currentText().trim().length > 0;
+    els.runBtn.disabled = !has;
+    els.runMeta.textContent = has
+      ? (state.mode === 'file' ? ('「' + state.fileName + '」を検査できます') : 'コードを検査できます')
+      : 'コードを入力すると実行できます';
+  }
+
+  els.langSelect.addEventListener('change', updateRunState);
+
+  /* ================================================================
+     言語判定
+  ================================================================= */
+  function detectLanguage(text, hintExt){
+    const explicit = els.langSelect.value;
+    if (explicit !== 'auto') return explicit;
+    if (hintExt) return hintExt;
+
+    const t = text.trim();
+    if (/^\s*</.test(t) && /<\/?[a-z!][^>]*>/i.test(t) && /<html|<!doctype|<div|<span|<body|<head/i.test(t)) return 'html';
+    if (/^\s*[\{\[]/.test(t) && (/"\s*:\s*/.test(t) || /^\s*\[/.test(t))) {
+      try { JSON.parse(t); return 'json'; } catch(e){ /* fallthrough */ }
+    }
+    if (/(^|\n)\s*(def |import |from .+ import|print\(|class .+:|elif |except |#!.*python)/.test(t)) return 'py';
+    if (/[.#]?[a-zA-Z0-9_-]+\s*\{[^}]*:[^}]*;/.test(t) && /\{[\s\S]*:[\s\S]*;[\s\S]*\}/.test(t) && !/function|const |let |var |=>/.test(t)) return 'css';
+    if (/function\s|=>|const |let |var |console\.|document\.|import\s.+from|export /.test(t)) return 'js';
+    return 'js';
+  }
+
+  /* ================================================================
+     検査ロジック本体
+     重要: 言語ごとの字句境界を先に確定し、その後に構文/AST/相互参照を行う。
+  ================================================================= */
+
+  const SEVERITY_RANK = { CRITICAL:0, HIGH:1, MEDIUM:2, LOW:3, INFO:4 };
+
+  const builtins = new Set([
+    'window','document','console','Math','Date','JSON','Array','Object','String','Number','Boolean',
+    'RegExp','Set','Map','WeakMap','WeakSet','Promise','Symbol','BigInt','Error','TypeError','SyntaxError',
+    'parseInt','parseFloat','isNaN','isFinite','Infinity','NaN','undefined','null','setTimeout','clearTimeout',
+    'setInterval','clearInterval','requestAnimationFrame','cancelAnimationFrame','fetch','URL','URLSearchParams',
+    'alert','confirm','prompt','Intl','Reflect','Proxy','structuredClone','performance','crypto','localStorage',
+    'sessionStorage','FormData','FileReader','Blob','Event','CustomEvent','KeyboardEvent','MouseEvent',
+    'HTMLElement','Node','NodeList','HTMLCollection','Audio','Image','location','history','navigator'
+  ]);
+
+  function makeIssue({severity='MEDIUM', category='ロジック', line=1, title, desc, snippet='', fixBefore='', fixAfter='', confidence='high',
+                      kind='', rootId=null, secondary=false}){
+    return {severity,category,line,title,desc,snippet,fixBefore,fixAfter,confidence,kind,rootId,secondary};
+  }
+
+  function pushIssue(list, issue){
+    const x = typeof issue === 'string' ? {title:issue} : issue;
+    list.push(makeIssue(x));
+  }
+
+  function lineAt(text, idx){ return text.slice(0, Math.max(0,idx)).split('\n').length; }
+  function getLineText(lines, n){ return (lines[n-1] || '').trim(); }
+
+  function locToLine(text, nodeOrPos){
+    if (typeof nodeOrPos === 'number') return lineAt(text,nodeOrPos);
+    return nodeOrPos?.loc?.start?.line || lineAt(text,nodeOrPos?.start || 0);
+  }
+
+  function addIssue(list, text, {severity='MEDIUM',category='ロジック',line=1,title,desc,snippet='',fixBefore='',fixAfter='',confidence='high',kind='',rootId=null,secondary=false}){
+    list.push(makeIssue({severity,category,line,title,desc,snippet:snippet || getLineText(text.split('\n'),line),fixBefore,fixAfter,confidence,kind,rootId,secondary}));
+  }
+
+  function stripHashBang(text){ return text.startsWith('#!') ? text.replace(/^#![^\n]*/, m=>' '.repeat(m.length)) : text; }
+
+  function createSourceMap(text, baseLine=1){
+    return { text, baseLine, lineAt(pos){ return baseLine + lineAt(text,pos)-1; } };
+  }
+
+  function parseJSWithAcorn(text){
+    if (!window.acorn?.Parser){
+      try { new Function(stripHashBang(text)); return {ast:null,error:null,parser:'native'}; }
+      catch(e){ return {ast:null,error:e,parser:'native'}; }
+    }
+    const opts={ecmaVersion:'latest',sourceType:'module',locations:true,allowHashBang:true};
+    try {
+      return {ast:window.acorn.Parser.parse(stripHashBang(text),opts),error:null,parser:'acorn'};
+    } catch(moduleErr){
+      try {
+        return {ast:window.acorn.Parser.parse(stripHashBang(text),{...opts,sourceType:'script'}),error:null,parser:'acorn'};
+      } catch(e){ return {ast:null,error:e,parser:'acorn'}; }
+    }
+  }
+
+  function parseLoose(text){
+    try {
+      if (window.acornLoose?.parse) return window.acornLoose.parse(stripHashBang(text),{ecmaVersion:'latest',locations:true});
+    } catch(e) {}
+    return null;
+  }
+
+  function syntaxMessage(e){
+    const m=String(e?.message||'Syntax error');
+    if (/unterminated.*string|Unterminated string/i.test(m)) return '文字列リテラルが正しく閉じられていません。';
+    if (/unterminated.*template|Unterminated template/i.test(m)) return 'テンプレートリテラルが正しく閉じられていません。';
+    if (/regular expression|regexp|Unterminated regular expression|Invalid regular expression/i.test(m)) return '正規表現リテラルが正しく閉じられていません。';
+    if (/Unexpected token|Unexpected character/i.test(m)) return '予期しないトークンがあります。括弧・演算子・区切り記号の対応を確認してください。';
+    if (/Unexpected end/i.test(m)) return 'コード末尾までに必要な括弧・文字列・構文要素が閉じられていません。';
+    return m;
+  }
+
+  // 状態機械でコメント・文字列・template・regexを除外した「解析対象コード」を作る。
+  function maskJS(text){
+    let out='', mode='code', quote='', escaped=false, regexCharClass=false, prevSig='';
+    const isRegexStart=()=> !prevSig || /[({[=,:;!&|?+\-*%^~<>]/.test(prevSig);
+    for(let i=0;i<text.length;i++){
+      const c=text[i],n=text[i+1];
+      if(mode==='line'){ out+=' '; if(c==='\n'){mode='code'; out+='\n';} continue; }
+      if(mode==='block'){ out+=c==='\n'?'\n':' '; if(c==='*'&&n==='/'){out+=' ';i++;mode='code';} continue; }
+      if(mode==='string'){
+        if(c==='\n') out+='\n'; else out+=' ';
+        if(escaped) escaped=false; else if(c==='\\') escaped=true; else if(c===quote) mode='code';
+        continue;
+      }
+      if(mode==='template'){
+        if(c==='\n') out+='\n'; else out+=' ';
+        if(escaped) escaped=false; else if(c==='\\') escaped=true; else if(c==='`') mode='code';
+        // ${...} is intentionally masked here; AST handles it when Acorn is available.
+        continue;
+      }
+      if(c==='/'&&n==='/'){out+='  ';i++;mode='line';continue;}
+      if(c==='/'&&n==='*'){out+='  ';i++;mode='block';continue;}
+      if(c==='"'||c==="'"){out+=' ';mode='string';quote=c;continue;}
+      if(c==='`'){out+=' ';mode='template';continue;}
+      if(c==='/'&&isRegexStart()){
+        // Scan regex literal without treating /[/]/ as comments.
+        let j=i+1, cls=false, esc=false, valid=false;
+        for(;j<text.length;j++){
+          const r=text[j];
+          if(r==='\n'&&!esc) break;
+          if(esc){esc=false;continue;}
+          if(r==='\\'){esc=true;continue;}
+          if(r==='['){cls=true;continue;}
+          if(r===']'&&cls){cls=false;continue;}
+          if(r==='/'&&!cls){valid=true;j++;while(/[a-z]/i.test(text[j]||''))j++;break;}
+        }
+        if(valid){ while(i<j){ out += text[i]==='\n'?'\n':' '; i++; } i--; continue; }
+      }
+      out+=c; if(!/\s/.test(c)) prevSig=c;
+    }
+    return out;
+  }
+
+  function tokenizeJS(text){
+    const masked=maskJS(text);
+    const tokens=[];
+    const re=/[A-Za-z_$][\w$]*|(?:\d+(?:\.\d+)?)|===|!==|==|!=|=>|<=|>=|\+\+|--|\+=|-=|\*=|\/=|&&|\|\||\?\?|[(){}\[\].,;:?+\-*%/=<>!&|]/g;
+    let m; while((m=re.exec(masked))) tokens.push({value:m[0],pos:m.index,line:lineAt(text,m.index)});
+    return {masked,tokens};
+  }
+
+  function walkAST(node, fn, parent=null, key=''){
+    if(!node||typeof node!=='object') return;
+    fn(node,parent,key);
+    for(const k in node){
+      if(k==='loc'||k==='start'||k==='end') continue;
+      const v=node[k];
+      if(v&&typeof v==='object'){
+        if(Array.isArray(v)) v.forEach(ch=>walkAST(ch,fn,node,k)); else if(v.type) walkAST(v,fn,node,k);
+      }
+    }
+  }
+
+  function sourceSlice(text,node){ return node?.start!=null && node?.end!=null ? text.slice(node.start,node.end) : ''; }
+
+  function collectASTFacts(ast,text){
+    const declared=new Map();
+    const used=[];
+    const constNames=new Set(), letNames=new Set(), functions=new Map();
+    const eventRegs=[], calls=[], assignments=[], comparisons=[];
+    function declare(name,node,kind){
+      if(!name) return; const a=declared.get(name)||[]; a.push({node,kind}); declared.set(name,a);
+      if(kind==='const') constNames.add(name); if(kind==='let'||kind==='var') letNames.add(name);
+    }
+    walkAST(ast,(n,parent,key)=>{
+      if(n.type==='VariableDeclarator'&&n.id?.type==='Identifier') declare(n.id.name,n,n.kind||parent?.kind||'var');
+      if(n.type==='FunctionDeclaration'&&n.id){declare(n.id.name,n,'function'); functions.set(n.id.name,n);}
+      if(n.type==='FunctionExpression'&&n.id) declare(n.id.name,n,'function');
+      if((n.type==='FunctionDeclaration'||n.type==='FunctionExpression'||n.type==='ArrowFunctionExpression')&&Array.isArray(n.params)){
+        n.params.forEach(p=>{
+          if(p?.type==='Identifier') declare(p.name,p,'param');
+          if(p?.type==='AssignmentPattern'&&p.left?.type==='Identifier') declare(p.left.name,p.left,'param');
+          if(p?.type==='RestElement'&&p.argument?.type==='Identifier') declare(p.argument.name,p.argument,'param');
+        });
+      }
+      if(n.type==='ImportDeclaration'){
+        (n.specifiers||[]).forEach(sp=>{if(sp.local?.name) declare(sp.local.name,sp.local,'import');});
+      }
+      if(n.type==='CatchClause'&&n.param?.type==='Identifier') declare(n.param.name,n.param,'catch');
+      if(n.type==='ClassDeclaration'&&n.id) declare(n.id.name,n,'class');
+      if(n.type==='Identifier'){
+        const isDecl = parent && ((parent.type==='VariableDeclarator'&&parent.id===n)||
+          (parent.type==='FunctionDeclaration'&&parent.id===n)||
+          (parent.type==='FunctionExpression'&&parent.id===n)||
+          (parent.type==='ClassDeclaration'&&parent.id===n)||
+          (parent.type==='Property'&&parent.key===n&&!parent.computed)||
+          (parent.type==='MethodDefinition'&&parent.key===n&&!parent.computed));
+        const isProp = parent && parent.type==='MemberExpression' && parent.property===n && !parent.computed;
+        if(!isDecl&&!isProp) used.push({name:n.name,node:n,parent});
+      }
+      if(n.type==='AssignmentExpression') assignments.push(n);
+      if(n.type==='CallExpression') calls.push(n);
+      if(n.type==='BinaryExpression'||n.type==='LogicalExpression'||n.type==='ConditionalExpression') comparisons.push(n);
+      if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'&&n.callee.property?.name==='addEventListener'){
+        const event=n.arguments?.[0]; const handler=n.arguments?.[1];
+        if(event?.type==='Literal'&&typeof event.value==='string') eventRegs.push({node:n,target:sourceSlice(text,n.callee.object),event:event.value,handler:sourceSlice(text,handler||{})});
+      }
+    });
+    return {declared,used,constNames,letNames,functions,eventRegs,calls,assignments,comparisons};
+  }
+
+  function getFunctionAncestors(ast){
+    const funcs=[];
+    walkAST(ast,(n)=>{ if(['FunctionDeclaration','FunctionExpression','ArrowFunctionExpression'].includes(n.type)) funcs.push(n); });
+    return funcs;
+  }
+
+  function nodeContains(node,pos){ return node?.start<=pos && pos<=node?.end; }
+  function enclosingFunction(ast,pos){
+    let best=null; walkAST(ast,n=>{if(['FunctionDeclaration','FunctionExpression','ArrowFunctionExpression'].includes(n.type)&&nodeContains(n,pos)){ if(!best||n.end-n.start<best.end-best.start) best=n;}}); return best;
+  }
+
+  function checkCommon(text, lines, issues){
+    // Common checks are now language-safe: no HTML/CSS/JS mixed brace stack.
+    lines.forEach((l,i)=>{
+      if(/^\s*(?:\t+ +| +\t+)/.test(l)) addIssue(issues,text,{severity:'INFO',category:'スタイル',line:i+1,title:'インデントにタブとスペースが混在しています',desc:'同一ファイル内でインデント方法が混在しています。',snippet:l.trim(),confidence:'high'});
+      if(l.length>300) addIssue(issues,text,{severity:'INFO',category:'スタイル',line:i+1,title:'非常に長い行があります',desc:`${l.length}文字の長い行です。可読性や保守性の低下につながる場合があります。`,confidence:'high'});
+      const m=l.match(/\b(TODO|FIXME|XXX)\b[:：]?\s*(.*)/);
+      if(m) addIssue(issues,text,{severity:'INFO',category:'メモ',line:i+1,title:`${m[1]} コメントが残っています`,desc:m[2]?`内容: ${m[2].slice(0,120)}`:'未完了タスクを示すコメントです。',snippet:l.trim()});
+    });
+    if(text.charCodeAt(0)===0xFEFF) addIssue(issues,text,{severity:'INFO',category:'エンコード',line:1,title:'ファイル先頭にBOMがあります',desc:'UTF-8 BOM付きです。通常は問題ありませんが、特殊な環境では扱いに差が出ます。'});
+  }
+
+  function scanHTMLTokens(text){
+    const tags=[], comments=[], attrs=[];
+    let i=0;
+    const lower=text.toLowerCase();
+    while(i<text.length){
+      if(text.startsWith('<!--',i)){ const end=text.indexOf('-->',i+4); comments.push({start:i,end:end<0?text.length:end+3,closed:end>=0}); i=end<0?text.length:end+3; continue; }
+      if(text[i]!=='<'){i++;continue;}
+      // Do not inspect JS/CSS contents as HTML.
+      const next=text.slice(i+1).match(/^\s*(script|style)\b/i);
+      if(next){
+        const tagName=next[1].toLowerCase(); const openEnd=text.indexOf('>',i+1);
+        if(openEnd<0){tags.push({name:tagName,start:i,end:text.length,close:false,attrsText:text.slice(i+1)});break;}
+        const openRaw=text.slice(i,openEnd+1); const attrOnly=openRaw.replace(new RegExp('^<\\s*'+tagName+'\\b','i'),'').replace(/>\s*$/,''); tags.push({name:tagName,start:i,end:openEnd+1,close:false,attrsText:attrOnly});
+        const closeRe=new RegExp(`</${tagName}\\s*>`,'ig'); closeRe.lastIndex=openEnd+1; const cm=closeRe.exec(text);
+        if(!cm){ i=text.length; } else { tags.push({name:tagName,start:cm.index,end:cm.index+cm[0].length,close:true,attrsText:''}); i=cm.index+cm[0].length; }
+        continue;
+      }
+      const gt=text.indexOf('>',i+1); if(gt<0){i++;continue;}
+      const raw=text.slice(i,gt+1); const m=raw.match(/^<\s*(\/)?\s*([A-Za-z][A-Za-z0-9:-]*)([\s\S]*?)(\/?)>$/);
+      if(!m){i=gt+1;continue;}
+      const isClose=!!m[1], name=m[2].toLowerCase(), attrText=m[3]||'', selfClosing=!!m[4];
+      tags.push({name,start:i,end:gt+1,close:isClose,selfClosing,attrsText:attrText});
+      if(!isClose){
+        const attrRe=/([:@A-Za-z_][\w:.-]*)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s>]+))?/g; let am;
+        while((am=attrRe.exec(attrText))){
+          attrs.push({name:am[1].toLowerCase(),valueRaw:am[2]||null,tag:name,start:i+1+raw.indexOf(am[0])});
+        }
+      }
+      i=gt+1;
+    }
+    return {tags,comments,attrs};
+  }
+
+  const voidTags = new Set(['area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr']);
+  const knownHTMLTags = new Set(['html','head','body','title','meta','link','style','script','main','header','footer','nav','section','article','aside','div','span','p','a','img','picture','source','figure','figcaption','button','form','label','input','textarea','select','option','optgroup','fieldset','legend','table','thead','tbody','tfoot','tr','th','td','ul','ol','li','dl','dt','dd','strong','em','small','pre','code','blockquote','h1','h2','h3','h4','h5','h6','br','hr','canvas','audio','video','iframe','details','summary','dialog','template','svg','path','g','circle','rect','line','polyline','polygon','use']);
+  const globalHTMLAttrs = new Set(['id','class','style','title','hidden','lang','dir','role','tabindex','slot','part','data-*','aria-*','name','value','type','disabled','checked','selected','multiple','required','readonly','placeholder','autocomplete','min','max','step','for','href','src','alt','width','height','target','rel','action','method','enctype','novalidate','content','charset','rows','cols','colspan','rowspan','draggable','contenteditable']);
+  const tagRequiredAttrs={img:['src','alt'],area:['href','alt']};
+
+  function extractEmbedded(text,tags){
+    const scripts=[],styles=[];
+    let open=null;
+    for(const t of tags){
+      if(t.name==='script'&&!t.close){ open=t; continue; }
+      if(t.name==='script'&&t.close&&open){ const raw=text.slice(open.end,t.start); scripts.push({text:raw,start:open.end,line:lineAt(text,open.end),attrs:open.attrsText}); open=null; }
+    }
+    open=null;
+    for(const t of tags){
+      if(t.name==='style'&&!t.close){open=t;continue;}
+      if(t.name==='style'&&t.close&&open){const raw=text.slice(open.end,t.start);styles.push({text:raw,start:open.end,line:lineAt(text,open.end),attrs:open.attrsText});open=null;}
+    }
+    return {scripts,styles};
+  }
+
+  function parseAttrs(attrsText){
+    const list=[]; const re=/([:@A-Za-z_][\w:.-]*)(?:\s*=\s*("[^"]*"|'[^']*'|[^\s>]+))?/g; let m;
+    while((m=re.exec(attrsText))) list.push({name:m[1].toLowerCase(),rawValue:m[2]||null,value:m[2]?(m[2][0]==='"'||m[2][0]==="'"?m[2].slice(1,-1):m[2]):'',quoted:!!m[2]&&(m[2][0]==='"'||m[2][0]==="'")});
+    return list;
+  }
+
+  function checkHTML(text,lines,issues){
+    const {tags,comments,attrs}=scanHTMLTokens(text);
+    // Comment checks without parsing comment contents as tags.
+    comments.filter(c=>!c.closed).forEach(c=>addIssue(issues,text,{severity:'CRITICAL',category:'HTML',line:lineAt(text,c.start),title:'HTMLコメントが閉じられていません',desc:'<!-- から --> までが閉じられていません。後続HTMLがコメント扱いになる可能性があります.',snippet:'<!-- ...',kind:'html-comment'}));
+
+    const stack=[];
+    const idMap=new Map(), classSet=new Set(), inlineHandlers=[];
+    for(const t of tags){
+      if(!t.close){
+        if(!knownHTMLTags.has(t.name)&&t.name.includes(':')===false&&!t.name.includes('-')) addIssue(issues,text,{severity:'MEDIUM',category:'HTML',line:lineAt(text,t.start),title:`未知のHTMLタグ <${t.name}>`,desc:'標準HTMLタグとして認識できません。Custom Elementである場合は意図した命名か確認してください。',snippet:text.slice(t.start,t.end),confidence:'medium'});
+        if(!voidTags.has(t.name)&&!t.selfClosing) stack.push(t);
+      } else {
+        const idx=[...stack].map(x=>x.name).lastIndexOf(t.name);
+        if(idx<0) addIssue(issues,text,{severity:'HIGH',category:'HTML',line:lineAt(text,t.start),title:`対応する開始タグのない終了タグ </${t.name}>`,desc:'対応する開始タグがありません。',snippet:text.slice(t.start,t.end),kind:'html-structure'});
+        else if(idx!==stack.length-1){
+          const top=stack[stack.length-1];
+          const rootId='html-nest-'+t.start;
+          addIssue(issues,text,{severity:'HIGH',category:'HTML',line:lineAt(text,t.start),title:'タグの入れ子が崩れています',desc:`<${top.name}> が閉じられる前に </${t.name}> が出現しました。`,snippet:text.slice(t.start,t.end),kind:'html-nest',rootId});
+          stack.splice(idx);
+        } else stack.pop();
+      }
+    }
+    stack.forEach(t=>addIssue(issues,text,{severity:'HIGH',category:'HTML',line:lineAt(text,t.start),title:`閉じられていないタグ <${t.name}>`,desc:`対応する </${t.name}> が見つかりません。`,snippet:text.slice(t.start,t.end),kind:'html-structure'}));
+
+    if(/<html\b/i.test(text)&&!/^\s*<!doctype\s+html\b/i.test(text)) addIssue(issues,text,{severity:'LOW',category:'HTML',line:1,title:'<!DOCTYPE html> 宣言がありません',desc:'互換モードを避けるため、HTML文書ではDOCTYPEを推奨します。',confidence:'high'});
+
+    const duplicateAttrMap=[];
+    for(const t of tags){ if(t.close) continue; const a=parseAttrs(t.attrsText); const seen=new Map();
+      for(const at of a){
+        const prev=seen.get(at.name)||[]; prev.push(at); seen.set(at.name,prev);
+        const globalAllowed = globalHTMLAttrs.has(at.name)||at.name.startsWith('data-')||at.name.startsWith('aria-')||at.name.startsWith('on')||at.name.includes(':')||['viewbox','fill','stroke','stroke-width','stroke-linecap','stroke-linejoin','d','preserveaspectratio'].includes(at.name);
+        if(!globalAllowed) addIssue(issues,text,{severity:'LOW',category:'HTML',line:lineAt(text,t.start),title:`不正または未確認の属性 "${at.name}"`,desc:'要素固有属性、data-*、aria-*、または標準属性か確認してください。',snippet:text.slice(t.start,t.end),confidence:'medium',kind:'html-attr'});
+        if(at.rawValue && !at.quoted) addIssue(issues,text,{severity:'LOW',category:'HTML',line:lineAt(text,t.start),title:`属性値 ${at.name} はクォートされていません`,desc:'HTMLでは属性値を引用符で囲む書き方を推奨します。ただしHTML仕様上、一部の値は未引用でも合法なので「警告」に留めます。',snippet:text.slice(t.start,t.end),confidence:'high',kind:'html-attr-unquoted'});
+      }
+      for(const [name,vals] of seen) if(vals.length>1) addIssue(issues,text,{severity:'HIGH',category:'HTML',line:lineAt(text,t.start),title:`属性 "${name}" が重複しています`,desc:'同一要素で同名属性が複数あるため、ブラウザによる解釈が不明確になります。',snippet:text.slice(t.start,t.end),kind:'duplicate-attr'});
+      const attrs=parseAttrs(t.attrsText); const id=attrs.find(a=>a.name==='id')?.value; const cls=attrs.find(a=>a.name==='class')?.value;
+      if(id){const arr=idMap.get(id)||[];arr.push(lineAt(text,t.start));idMap.set(id,arr);}
+      if(cls) cls.split(/\s+/).filter(Boolean).forEach(c=>classSet.add(c));
+      const h=attrs.find(a=>a.name==='onclick'); if(h) inlineHandlers.push({line:lineAt(text,t.start),code:h.value});
+      const required=tagRequiredAttrs[t.name]||[]; required.forEach(r=>{if(!attrs.some(a=>a.name===r)) addIssue(issues,text,{severity:r==='src'&&t.name==='script'?'MEDIUM':'MEDIUM',category:'HTML',line:lineAt(text,t.start),title:`<${t.name}> に ${r} 属性がありません`,desc:`この要素では ${r} が必要な可能性があります。`,snippet:text.slice(t.start,t.end),confidence:'medium'});});
+      if(t.name==='script'){const type=attrs.find(a=>a.name==='type')?.value; if(type&&!/^(text|application)\/javascript$/i.test(type)&&!/^module$/i.test(type)) addIssue(issues,text,{severity:'MEDIUM',category:'HTML',line:lineAt(text,t.start),title:'script の type 属性を確認してください',desc:'JavaScript以外のtypeになっています。意図したものか確認してください。',snippet:text.slice(t.start,t.end),confidence:'medium'});}
+      if(t.name==='input'){const type=(attrs.find(a=>a.name==='type')?.value||'text').toLowerCase(); if(type==='image'&&!attrs.some(a=>a.name==='alt')) addIssue(issues,text,{severity:'MEDIUM',category:'HTML',line:lineAt(text,t.start),title:'input type=image に alt がありません',desc:'画像ボタンの代替テキストを指定してください。',snippet:text.slice(t.start,t.end)});}
+      if(t.name==='button'&&!attrs.some(a=>a.name==='type')) addIssue(issues,text,{severity:'LOW',category:'HTML',line:lineAt(text,t.start),title:'button の type が指定されていません',desc:'form内では暗黙の submit になり得るため、type="button" / "submit" を明示すると安全です。',snippet:text.slice(t.start,t.end),confidence:'high'});
+      const urlAttr=attrs.find(a=>a.name==='href'||a.name==='src'); if(urlAttr && /^javascript:/i.test(urlAttr.value)) addIssue(issues,text,{severity:'HIGH',category:'セキュリティ',line:lineAt(text,t.start),title:`${urlAttr.name} に javascript: URL があります`,desc:'実行可能なURLスキームはXSSの原因になり得ます。',snippet:text.slice(t.start,t.end)});
+    }
+    for(const [id,lines_] of idMap) if(lines_.length>1) addIssue(issues,text,{severity:'HIGH',category:'HTML',line:lines_[lines_.length-1],title:`id "${id}" が重複しています`,desc:`${lines_.join('、')}行目に同じidがあります。DOM参照先が不安定になります。`,confidence:'high',kind:'duplicate-id'});
+    // Existing IDs and classes are returned for cross-language checks.
+    return {ids:new Set(idMap.keys()),classes:classSet,inlineHandlers};
+  }
+
+  function cssSelectors(text){
+    const masked=maskCSS(text), selectors=[];
+    const re=/([^{}]+)\{/g;
+    let m; while((m=re.exec(masked))){ const raw=m[1].trim(); if(raw.startsWith('@')) continue; selectors.push({raw:m[1].trim(),line:lineAt(text,m.index)}); }
+    return selectors;
+  }
+
+  function maskCSS(text){
+    let o='',block=false,quote='',esc=false; for(let i=0;i<text.length;i++){const c=text[i],n=text[i+1];
+      if(block){o+=c==='\n'?'\n':' ';if(c==='*'&&n==='/'){o+=' ';i++;block=false;}continue;}
+      if(c==='/'&&n==='*'){o+='  ';i++;block=true;continue;}
+      if(quote){o+=c==='\n'?'\n':' ';if(esc)esc=false;else if(c==='\\')esc=true;else if(c===quote)quote='';continue;}
+      if(c==='"'||c==="'"){o+=' ';quote=c;continue;} o+=c;
+    } return o;
+  }
+
+  function checkCSS(text,lines,issues,htmlContext=null){
+    const masked=maskCSS(text);
+    // Balanced braces in CSS only.
+    let depth=0, stackPos=-1; for(let i=0;i<masked.length;i++){if(masked[i]==='{'){depth++; if(depth===1)stackPos=i;} else if(masked[i]==='}') {if(depth===0) addIssue(issues,text,{severity:'HIGH',category:'CSS',line:lineAt(text,i),title:'対応する { がない } があります',desc:'CSSブロックの閉じ順序が崩れています。',snippet:getLineText(lines,lineAt(text,i)),kind:'css-brace'}); else depth--;}}
+    if(depth>0) addIssue(issues,text,{severity:'HIGH',category:'CSS',line:lineAt(text,stackPos),title:'CSSの { が閉じられていません',desc:'ルールセットが最後まで閉じられていません。',snippet:getLineText(lines,lineAt(text,stackPos)),kind:'css-brace'});
+    if(/@media[^{}]*\{[^{}]*(?:$|\n)/m.test(masked)&&depth>0){}
+    if(/@media[^{}]*\{/.test(masked)) { const media=masked.match(/@media[^{}]*\{/g)||[]; for(const m of media){if(!/\)$/.test(m.trim().slice(0,-1))) addIssue(issues,text,{severity:'MEDIUM',category:'CSS',line:lineAt(text,masked.indexOf(m)),title:'@media 条件の構文を確認してください',desc:'media query の条件式が不完全な可能性があります。',snippet:m.trim(),confidence:'medium'});} }
+
+    const knownProps=new Set('display position inset top right bottom left z-index width min-width max-width height min-height max-height margin padding border border-radius background background-color color opacity font font-size font-weight line-height letter-spacing text-align text-decoration flex flex-direction flex-wrap align-items justify-content gap grid grid-template-columns grid-template-rows overflow overflow-x overflow-y cursor transition transform box-shadow filter pointer-events content visibility white-space word-break user-select object-fit object-position aspect-ratio'.split(/\s+/));
+    const ruleRe=/([^{}]+)\{([^{}]*)\}/g; let rm; const selectorCounts=new Map();
+    while((rm=ruleRe.exec(masked))){
+      const selector=rm[1].trim(); const body=rm[2]; const line=lineAt(text,rm.index); selectorCounts.set(selector,(selectorCounts.get(selector)||0)+1);
+      if(!selector) continue;
+      const decls=body.split(';').map(x=>x.trim()).filter(Boolean); const seen=new Map();
+      for(const d of decls){const ix=d.indexOf(':'); if(ix<1) {addIssue(issues,text,{severity:'MEDIUM',category:'CSS',line,title:'CSS宣言の構文が不正な可能性',desc:'プロパティ:値 の形式を確認してください。',snippet:d,confidence:'medium'});continue;}
+        const prop=d.slice(0,ix).trim().replace(/^[-]/,''); const val=d.slice(ix+1).trim(); const prev=seen.get(prop)||0; seen.set(prop,prev+1);
+        if(seen.get(prop)>1) addIssue(issues,text,{severity:'LOW',category:'CSS',line,title:`同一ルール内で ${prop} が重複しています`,desc:'後ろの宣言が前の宣言を上書きします。意図した上書きなら問題ありません。',snippet:d,confidence:'medium'});
+        if(!knownProps.has(prop)&&!prop.startsWith('--')) addIssue(issues,text,{severity:'LOW',category:'CSS',line,title:`未認識のCSSプロパティ候補: ${prop}`,desc:'スペルミスか、ブラウザ/仕様に依存するプロパティか確認してください。',snippet:d,confidence:'medium'});
+        if(/^(-?\d+(?:\.\d+)?)$/.test(val)&&Number(val)!==0&&/^(width|height|margin|padding|top|left|right|bottom)$/.test(prop)) addIssue(issues,text,{severity:'LOW',category:'CSS',line,title:`${prop} の単位がありません`,desc:'0以外の長さ値には通常単位が必要です。',snippet:d,confidence:'medium'});
+      }
+      const sm=selector.match(/#([A-Za-z_][\w-]*)/g)||[]; sm.forEach(x=>{const id=x.slice(1); if(htmlContext?.ids && !htmlContext.ids.has(id)) addIssue(issues,text,{severity:'MEDIUM',category:'CSS',line,title:`HTMLに存在しないid #${id} をCSSが参照しています`,desc:`HTML側のid一覧には ${id} が見つかりません。`,snippet:selector,confidence:'high',kind:'css-dom-ref'});});
+      const cm=selector.match(/\.([A-Za-z_][\w-]*)/g)||[]; cm.forEach(x=>{const cls=x.slice(1); if(htmlContext?.classes && !htmlContext.classes.has(cls)) addIssue(issues,text,{severity:'LOW',category:'CSS',line,title:`HTMLに存在しないclass .${cls} をCSSが参照しています`,desc:`HTML側のclass一覧には ${cls} が見つかりません。タイポの可能性があります。`,snippet:selector,confidence:'medium',kind:'css-dom-ref'});});
+    }
+    for(const [sel,count] of selectorCounts) if(count>1) addIssue(issues,text,{severity:'LOW',category:'CSS',line:1,title:`CSSルールが重複しています: ${sel}`,desc:`同じselectorが${count}回定義されています。後のルールが上書きしていないか確認してください。`,snippet:sel,confidence:'high'});
+    const comments=[]; let pos=0; while((pos=text.indexOf('/*',pos))>=0){const e=text.indexOf('*/',pos+2); if(e<0){comments.push(pos);break;}pos=e+2;} comments.forEach(p=>addIssue(issues,text,{severity:'HIGH',category:'CSS',line:lineAt(text,p),title:'CSSコメントが閉じられていません',desc:'/* から */ までが閉じられていません。'}));
+  }
+
+  function checkJS(text,lines,issues,context={}){
+    const parsed=parseJSWithAcorn(text);
+    let ast=parsed.ast;
+    if(parsed.error){
+      const line=locToLine(text,parsed.error.loc?.start?.line ? {loc:parsed.error.loc}:parsed.error.pos||0);
+      const rootLine=getLineText(lines,line);
+      const regexLike=/return\s+\/(?:\[|[^/\n]*$)|=\s*\/(?:\[|[^/\n]*$)/.test(rootLine);
+      addIssue(issues,text,{severity:'CRITICAL',category:'構文',line,title:regexLike?'正規表現リテラルが正しく閉じられていません':'JavaScript構文エラー',desc:regexLike?'開始 / に対応する終了 / が見つかりません。':syntaxMessage(parsed.error),snippet:rootLine,confidence:'high',kind:regexLike?'regex-syntax':'syntax',rootId:'js-syntax-'+line});
+      const loose=parseLoose(text);
+      if(loose) addIssue(issues,text,{severity:'LOW',category:'構文',line:Math.min(lines.length,line+1),title:'Secondary Parse Error',desc:`${line}行目の構文エラーにより、後続コードのAST解析結果は信頼度が低下しています。構文エラーを先に修正してください。`,snippet:getLineText(lines,Math.min(lines.length,line+1)),confidence:'high',secondary:true,rootId:'js-syntax-'+line});
+      // Safe recovery only: report the root parse error, then a small set of independent semantic checks.
+      checkJSFallbackSemantics(text,lines,issues,context,true);
+      return {ast:null,parser:parsed.parser,facts:null};
+    }
+    if(!ast){
+      checkJSFallbackSemantics(text,lines,issues,context);
+      return {ast:null,parser:parsed.parser,facts:null};
+    }
+    const facts=collectASTFacts(ast,text);
+
+    // Assignment-vs-comparison and const reassignments.
+    facts.assignments.forEach(n=>{
+      const line=locToLine(text,n);
+      if(n.left?.type==='Identifier' && context.constNames?.has(n.left.name) || n.left?.type==='Identifier' && facts.constNames.has(n.left.name)){
+        addIssue(issues,text,{severity:'HIGH',category:'ロジック',line,title:`const変数 "${n.left.name}" に再代入しています`,desc:'const は再代入できません。構文上エラーになります。',snippet:sourceSlice(text,n),confidence:'high',kind:'const-reassign'});
+      }
+      if(n.operator==='=' && n.left?.type==='MemberExpression' && n.right?.type==='UnaryExpression' && n.right.operator==='-' && n.right.argument?.type!=='Literal'){
+        const left=sourceSlice(text,n.left); addIssue(issues,text,{severity:'HIGH',category:'ゲームロジック',line,title:'負数代入の可能性: "=-"',desc:`${left} = -damage のようなコードは構文的には正しいため、減算( -= )との書き間違いでないか確認してください。`,snippet:sourceSlice(text,n),fixBefore:sourceSlice(text,n),fixAfter:sourceSlice(text,n).replace('=-','-='),confidence:'medium',kind:'assign-minus'});
+      }
+      if(n.operator==='=' && n.left?.type==='Identifier' && /^[a-zA-Z_$][\w$]*(?:Kill|Level|kills|level)$/i.test(n.left.name)){}
+      if(n.operator==='+=' && n.right?.type==='Literal' && typeof n.right.value==='string') addIssue(issues,text,{severity:'HIGH',category:'型',line,title:`数値への文字列加算の可能性: ${n.left.name||sourceSlice(text,n.left)} += "..."`,desc:'数値として扱う値に文字列を加えると、文字列連結になります。意図的な変換でなければバグ候補です。',snippet:sourceSlice(text,n),fixAfter:sourceSlice(text,n).replace(/\+?=\s*"([^"]*)"/,'+= Number("$1")'),confidence:'high',kind:'type-mismatch'});
+    });
+
+    walkAST(ast,(n,parent)=>{
+      const line=locToLine(text,n);
+      if(n.type==='IfStatement'&&n.test?.type==='AssignmentExpression'&&n.test.operator==='='){ addIssue(issues,text,{severity:'HIGH',category:'ロジック',line,title:'if条件で代入しています',desc:'比較ではなく代入です。意図的な代入でなければ === を使う可能性が高いです。',snippet:sourceSlice(text,n.test),fixBefore:sourceSlice(text,n.test),fixAfter:sourceSlice(text,n.test).replace(' = ',' === '),confidence:'high',kind:'assignment-in-condition'}); }
+      if((n.type==='BinaryExpression'||n.type==='LogicalExpression')&&['===','!==','==','!='].includes(n.operator)){
+        const a=n.left,b=n.right;
+        if(a?.type==='Literal'&&b?.type==='Literal'){let v=false;try{v=Function('return ('+sourceSlice(text,n)+')')();}catch(e){} if(typeof v==='boolean') addIssue(issues,text,{severity:'HIGH',category:'ロジック',line,title:`常に${v?'true':'false'}になる条件`,desc:'両辺がリテラルで固定されているため、条件の結果が変化しません。',snippet:sourceSlice(text,n),confidence:'high',kind:'constant-condition'});}
+      }
+      if(n.type==='BinaryExpression'&&n.operator==='/'&&n.right?.type==='Literal'&&n.right.value===0) addIssue(issues,text,{severity:'HIGH',category:'型',line,title:'0除算があります',desc:'実行時に Infinity/NaN を生成する可能性があります。',snippet:sourceSlice(text,n),confidence:'high',kind:'divide-zero'});
+      if(n.type==='BinaryExpression'&&n.operator==='-'&&parent?.type==='ExpressionStatement') addIssue(issues,text,{severity:'HIGH',category:'ロジック',line,title:'計算結果を使用していません',desc:`${sourceSlice(text,n)} の結果をどこにも代入・returnしていません。xp - 100; のような減算忘れの可能性があります。`,snippet:sourceSlice(text,n),confidence:'medium',kind:'unused-binary'});
+      if(n.type==='ExpressionStatement'&&n.expression?.type==='MemberExpression'&&n.expression.object?.name==='localStorage'&&n.expression.property?.name==='clear') addIssue(issues,text,{severity:'HIGH',category:'保存',line,title:'localStorage.clear を呼び出していません',desc:'clear メソッドを参照しているだけで、実行されません。',snippet:sourceSlice(text,n),fixBefore:sourceSlice(text,n),fixAfter:'localStorage.clear();',confidence:'high',kind:'method-reference'});
+      if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'&&n.callee.object?.name==='Math'&&n.callee.property?.name==='floor'){
+        const arg=n.arguments?.[0]; if(arg?.type==='BinaryExpression'&&arg.operator==='+'&&arg.right?.type==='Literal'&&arg.right.value===1&&arg.left?.type==='BinaryExpression'&&arg.left.operator==='*'&&arg.left.right?.type==='MemberExpression'&&arg.left.right.property?.name==='length'&&arg.left.left?.type==='CallExpression'&&arg.left.left.callee?.object?.name==='Math'&&arg.left.left.callee?.property?.name==='random') addIssue(issues,text,{severity:'HIGH',category:'ゲームロジック',line,title:'ランダム配列添字の上限が1つずれています',desc:'Math.floor(Math.random() * enemies.length + 1) は 1〜length になり、length が範囲外です。通常は Math.floor(Math.random() * enemies.length) です。',snippet:sourceSlice(text,n),fixBefore:sourceSlice(text,n),fixAfter:sourceSlice(text,n).replace(' + 1',''),confidence:'high',kind:'random-index'});
+      }
+      if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'&&n.callee.property?.name==='getElementById'&&n.arguments?.[0]?.type==='Literal'&&typeof n.arguments[0].value==='string'){
+        const id=n.arguments[0].value; if(context.ids && !context.ids.has(id)) addIssue(issues,text,{severity:'HIGH',category:'DOM',line,title:`存在しないDOM id "${id}" を参照しています`,desc:`HTML側に id="${id}" が見つかりません。近い名前がある場合はタイポの可能性があります。`,snippet:sourceSlice(text,n),confidence:'high',kind:'dom-id'});
+      }
+      if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'&&n.callee.property?.name==='querySelector'&&n.arguments?.[0]?.type==='Literal'&&typeof n.arguments[0].value==='string'&&context.domSelectors){
+        const sel=n.arguments[0].value; const idm=sel.match(/^#([\w-]+)$/); if(idm&&context.ids&&!context.ids.has(idm[1])) addIssue(issues,text,{severity:'HIGH',category:'DOM',line,title:`querySelector(${JSON.stringify(sel)}) の対象がHTMLにありません`,desc:`HTML側に ${sel} が存在しません。`,snippet:sourceSlice(text,n),confidence:'high'});
+        const cm=sel.match(/^\.([\w-]+)$/); if(cm&&context.classes&&!context.classes.has(cm[1])) addIssue(issues,text,{severity:'MEDIUM',category:'DOM',line,title:`querySelector(${JSON.stringify(sel)}) のclassがHTMLにありません`,desc:`HTML側に .${cm[1]} が存在しません。`,snippet:sourceSlice(text,n),confidence:'medium'});
+      }
+      if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'&&n.callee.property?.name==='addEventListener'){
+        const ev=n.arguments?.[0]?.value; const target=sourceSlice(text,n.callee.object); const handler=sourceSlice(text,n.arguments?.[1]||{});
+        const same=context.eventRegs?.find(r=>r.event===ev&&r.target===target&&r.handler===handler&&r.node!==n); if(same) addIssue(issues,text,{severity:'HIGH',category:'イベント',line,title:`${ev} イベントが二重登録されています`,desc:'同じ対象・同じイベント・同じハンドラが複数回登録されています。ゲーム更新ループ内だと攻撃や回復が二重発火しやすくなります。',snippet:sourceSlice(text,n),confidence:'high',kind:'duplicate-event'});
+        if((ev==='dragover'||ev==='drop')&&!(enclosingFunction(ast,n.start)&&/preventDefault\s*\(/.test(sourceSlice(text,enclosingFunction(ast,n.start))))) addIssue(issues,text,{severity:'MEDIUM',category:'イベント',line,title:`${ev} イベントで preventDefault() がありません`,desc:'ブラウザの標準ドラッグ動作が割り込む可能性があります。',snippet:sourceSlice(text,n),confidence:'medium'});
+      }
+      if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'&&n.callee.property?.name==='removeEventListener'){
+        const h=n.arguments?.[1]; if(h?.type==='FunctionExpression'||h?.type==='ArrowFunctionExpression') addIssue(issues,text,{severity:'MEDIUM',category:'イベント',line,title:'removeEventListener に新しい無名関数を渡しています',desc:'addEventListener時と同じ関数参照でなければ削除できません。',snippet:sourceSlice(text,n),confidence:'high'});
+      }
+      if(n.type==='MemberExpression'&&n.property?.type==='Identifier'&&['keyCode','which'].includes(n.property.name)) addIssue(issues,text,{severity:'LOW',category:'イベント',line,title:`古いKeyboardEvent API "${n.property.name}" の使用`,desc:'key / code などの現行プロパティを検討してください。',snippet:sourceSlice(text,n),confidence:'high'});
+      if(n.type==='BinaryExpression'&&['===','!==','==','!='].includes(n.operator)){
+        const l=n.left,r=n.right; if((l?.type==='Identifier'&&l.name==='NaN')||(r?.type==='Identifier'&&r.name==='NaN')) addIssue(issues,text,{severity:'HIGH',category:'型',line,title:'NaNを直接比較しています',desc:'NaNとの等価比較は成立しないため、Number.isNaN() を使用してください。',snippet:sourceSlice(text,n),confidence:'high'});
+      }
+    });
+
+    // Undefined-variable candidate: only names that are clearly identifier references, not properties/keys.
+    for(const u of facts.used){
+      if(builtins.has(u.name)||facts.declared.has(u.name)) continue;
+      if(u.parent?.type==='LabeledStatement') continue;
+      const line=locToLine(text,u.node);
+      // Globals commonly injected by browsers/tools are warning-level only.
+      addIssue(issues,text,{severity:'MEDIUM',category:'型',line,title:`未宣言変数の候補: ${u.name}`,desc:`この識別子は現在のAST上で宣言元を確認できませんでした。グローバル変数や外部ライブラリ由来なら問題ありません。`,snippet:sourceSlice(text,u.node),confidence:'medium',kind:'undefined-variable'});
+    }
+
+    // Unused variables, only local variable declarations with a resolvable usage count.
+    facts.declared.forEach((decls,name)=>{
+      const refs=facts.used.filter(u=>u.name===name);
+      decls.forEach(d=>{ if((d.kind==='let'||d.kind==='const'||d.kind==='var')&&refs.length===0) addIssue(issues,text,{severity:'LOW',category:'ロジック',line:locToLine(text,d.node),title:`変数 "${name}" が使用されていません`,desc:'宣言だけされ、参照されていません。不要な変数か、参照漏れの可能性があります。',snippet:sourceSlice(text,d.node),confidence:'high'}); });
+    });
+
+    // Function reference without call: only standalone expression statements.
+    walkAST(ast,(n,parent)=>{ if(n.type==='ExpressionStatement'&&n.expression?.type==='Identifier'&&facts.functions.has(n.expression.name)) addIssue(issues,text,{severity:'MEDIUM',category:'ロジック',line:locToLine(text,n),title:`関数 "${n.expression.name}" を呼び出さず参照しています`,desc:'実行したい関数なら () が必要です。',snippet:sourceSlice(text,n),fixAfter:`${n.expression.name}();`,confidence:'high'}); });
+
+    // Reachability after return/throw/break/continue in block.
+    walkAST(ast,n=>{ if(n.type==='BlockStatement'){ for(let i=0;i<n.body.length-1;i++){const st=n.body[i]; if(['ReturnStatement','ThrowStatement','BreakStatement','ContinueStatement'].includes(st.type)){ addIssue(issues,text,{severity:'LOW',category:'ロジック',line:locToLine(text,n.body[i+1]),title:'到達不能コードの可能性',desc:'直前の return/throw/break/continue の後ろに文があります。',snippet:sourceSlice(text,n.body[i+1]),confidence:'high',kind:'unreachable'}); break; } } } });
+
+    checkJSGameSemantics(ast,text,lines,issues,context);
+    return {ast,parser:parsed.parser,facts};
+  }
+
+  function checkJSGameSemantics(ast,text,lines,issues,context){
+    const saveLoad={save:null,load:null}; const handlers=[]; const loops=[];
+    walkAST(ast,(n)=>{
+      if(n.type==='FunctionDeclaration'&&n.id){if(/^(saveGame|save)$/i.test(n.id.name))saveLoad.save=n;if(/^(loadGame|load)$/i.test(n.id.name))saveLoad.load=n;}
+      if(n.type==='WhileStatement'||n.type==='ForStatement') loops.push(n);
+      if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'&&n.callee.object?.name==='setInterval') handlers.push(n);
+    });
+    // HP/MP/gold bounds and common game invariants.
+    walkAST(ast,(n)=>{ if(n.type!=='AssignmentExpression') return; const line=locToLine(text,n); const left=sourceSlice(text,n.left); const ls=left.toLowerCase();
+      if(/(?:^|\.)hp$/.test(ls)){ if(n.operator==='-='||n.operator==='-=') addIssue(issues,text,{severity:'MEDIUM',category:'ゲームロジック',line,title:'HPが0未満になる可能性があります',desc:'ダメージ適用後に Math.max(0, hp - damage) 等で下限を保証していません。常に問題とは限らないため警告扱いです。',snippet:sourceSlice(text,n),confidence:'medium'}); if(n.operator==='+='||n.operator==='=') addIssue(issues,text,{severity:'LOW',category:'ゲームロジック',line,title:'HP上限の境界を確認してください',desc:'回復・直接代入後に最大HPを超えない保証が見つかりませんでした。',snippet:sourceSlice(text,n),confidence:'low'}); }
+      if(/(?:^|\.)mp$/.test(ls)&&n.operator==='-=') addIssue(issues,text,{severity:'MEDIUM',category:'ゲームロジック',line,title:'MPが0未満になる可能性があります',desc:'スキル使用前にMP不足を弾くか、減算後に0以上へクランプする必要があります。',snippet:sourceSlice(text,n),confidence:'medium'});
+      if(/(^|\.)gold$/.test(ls)&&n.operator==='-=') addIssue(issues,text,{severity:'MEDIUM',category:'ゲームロジック',line,title:'所持金が0未満になる可能性があります',desc:'購入前の残高チェックが別途存在するか確認してください。',snippet:sourceSlice(text,n),confidence:'medium'});
+      if(/(^|\.)xp$/.test(ls)&&n.operator==='-') addIssue(issues,text,{severity:'HIGH',category:'ゲームロジック',line,title:'XP減算式を代入していません',desc:'xp - amount; のような式だけではXPは変化しません。',snippet:sourceSlice(text,n),confidence:'high'});
+    });
+    // Purchase check → subtraction in same function (best-effort).
+    walkAST(ast,(n)=>{if(n.type!=='IfStatement')return; const code=sourceSlice(text,n); if(/gold|money|coins/i.test(code)&&/(price|cost)/i.test(code)&&/if\s*\([^)]*(gold|money|coins)[^)]*[<>]=?/.test(code)&&!/(gold|money|coins)\s*-=/.test(code)&&/purchase|buy|shop/i.test(enclosingFunction(ast,n.start)?.id?.name||'')) addIssue(issues,text,{severity:'MEDIUM',category:'ゲームロジック',line:locToLine(text,n),title:'購入処理の金額減算を確認してください',desc:'残高チェックはありますが、購入成功時の所持金減算が同一関数内で見つかりませんでした。',snippet:sourceSlice(text,n),confidence:'low'});});
+    // Level-up thresholds.
+    walkAST(ast,(n)=>{if(n.type==='IfStatement'&&/level|xp/i.test(sourceSlice(text,n))&&/[<>]=/.test(sourceSlice(text,n.test||n))&&!/level\s*\+\+|level\s*\+=/.test(sourceSlice(text,n.consequent||{}))) addIssue(issues,text,{severity:'LOW',category:'ゲームロジック',line:locToLine(text,n),title:'レベルアップ条件の後にレベル更新がない可能性',desc:'XP閾値の判定に対して level の更新が見つからない候補です。',snippet:sourceSlice(text,n),confidence:'low'});});
+    // setInterval duplicate registration.
+    const seen=new Map(); handlers.forEach(n=>{const key=sourceSlice(text,n);const prev=seen.get(key);if(prev) addIssue(issues,text,{severity:'HIGH',category:'イベント',line:locToLine(text,n),title:'setInterval が重複登録されています',desc:'同じ interval が複数回開始されると、ゲームループや攻撃処理が二重発火することがあります。',snippet:key,confidence:'high'});else seen.set(key,n);});
+    // Infinite loop candidate: while(true) without obvious break/return.
+    loops.forEach(n=>{ if(n.type==='WhileStatement'&&n.test?.type==='Literal'&&n.test.value===true&&!/\bbreak\b|\breturn\b/.test(sourceSlice(text,n.body))) addIssue(issues,text,{severity:'HIGH',category:'ロジック',line:locToLine(text,n),title:'終了条件のない while(true) の可能性',desc:'ループ本体に break/return が見つかりません。ゲームループなど意図的な場合は問題ありません。',snippet:sourceSlice(text,n),confidence:'medium'}); });
+    // Save / load integrity.
+    if(saveLoad.save){const code=sourceSlice(text,saveLoad.save); const hasSet=/(localStorage|sessionStorage)\.setItem\s*\(/.test(code), hasStringify=/JSON\.stringify\s*\(/.test(code); if(hasSet&&!hasStringify) addIssue(issues,text,{severity:'HIGH',category:'保存',line:locToLine(text,saveLoad.save),title:'saveGame の保存前に JSON.stringify が見つかりません',desc:'オブジェクトをlocalStorageへ直接渡すと文字列化結果が "[object Object]" になるなど、状態復元に失敗する可能性があります。',snippet:'saveGame(...)',confidence:'high'}); }
+    if(saveLoad.load){const code=sourceSlice(text,saveLoad.load), hasGet=/(localStorage|sessionStorage)\.getItem\s*\(/.test(code), hasParse=/JSON\.parse\s*\(/.test(code), hasNullCheck=/if\s*\([^)]*(===|==|!)[^)]*(null|undefined)|\?\?/.test(code); if(hasGet&&hasParse&&!hasNullCheck) addIssue(issues,text,{severity:'MEDIUM',category:'保存',line:locToLine(text,saveLoad.load),title:'loadGame の null 処理を確認してください',desc:'保存データが存在しない場合 getItem() は null を返すため、JSON.parse(null) や後続参照の意図を確認してください。',snippet:'loadGame(...)',confidence:'medium'}); }
+  }
+
+  function checkJSFallbackSemantics(text,lines,issues,context={},syntaxAlreadyReported=false){
+    const masked=maskJS(text);
+    // Specific lexer-level recovery for malformed regex literals when AST/native parse fails.
+    lines.forEach((raw,i)=>{
+      const candidate=raw.match(/(^|[=:(,;{}\[!]\s*)\/(?![/*])(?:[^/\n\\]|\\.)*$/);
+      if(candidate && !syntaxAlreadyReported) addIssue(issues,text,{severity:'CRITICAL',category:'構文',line:i+1,title:'正規表現リテラルが正しく閉じられていません',desc:'開始 / に対応する終了 / が同じリテラル内に見つかりません。',snippet:raw.trim(),confidence:'high',kind:'regex-syntax',rootId:'js-regex-'+(i+1)});
+    });
+    lines.forEach((raw,i)=>{
+      const line=raw.trim(); const code=masked.split('\n')[i]||''; const rawLine=raw;
+      if(/\bif\s*\([^)]*(?<![=!<>])=(?!=)[^)]*\)/.test(code)) addIssue(issues,text,{severity:'HIGH',category:'ロジック',line:i+1,title:'if条件で代入しています',desc:'比較ではなく代入です。=== などとの書き間違いでないか確認してください。',snippet:line,fixBefore:line,fixAfter:line.replace(/=([^=])/,'===$1'),confidence:'high',kind:'assignment-in-condition'});
+      if(/Math\.floor\(\s*Math\.random\(\)\s*\*\s*[A-Za-z_$][\w$]*\.length\s*\+\s*1\s*\)/.test(rawLine)) addIssue(issues,text,{severity:'HIGH',category:'ゲームロジック',line:i+1,title:'ランダム配列添字の上限が1つずれています',desc:'Math.random() の整数化に +1 を足すと length 自体を選ぶ可能性があります。',snippet:line,fixBefore:line,fixAfter:line.replace(/\s*\+\s*1\s*\)/,')'),confidence:'high',kind:'random-index'});
+      if(/\b(?:gold|coins|money)\s*\+=\s*["']/.test(rawLine)) addIssue(issues,text,{severity:'HIGH',category:'型',line:i+1,title:'数値への文字列加算の可能性',desc:'数値に文字列を += すると文字列連結になります。',snippet:line,confidence:'high',kind:'type-mismatch'});
+      if(/\bxp\s*-\s*\d+(?:\.\d+)?\s*;?$/.test(rawLine.trim())) addIssue(issues,text,{severity:'HIGH',category:'ゲームロジック',line:i+1,title:'XP減算式を代入していません',desc:'xp - 100; のような式だけではXPは変化しません。',snippet:line,confidence:'high',kind:'unused-binary'});
+      if(/\blocalStorage\.clear\s*;/.test(rawLine)) addIssue(issues,text,{severity:'HIGH',category:'保存',line:i+1,title:'localStorage.clear を呼び出していません',desc:'clear メソッドを参照しているだけで実行されません。',snippet:line,fixBefore:line,fixAfter:line.replace(/clear\s*;/,'clear();'),confidence:'high',kind:'method-reference'});
+      const idm=rawLine.match(/document\.getElementById\(\s*["']([^"']+)["']\s*\)/); if(idm&&context.ids&&!context.ids.has(idm[1])) addIssue(issues,text,{severity:'HIGH',category:'DOM',line:i+1,title:`存在しないDOM id "${idm[1]}" を参照しています`,desc:`HTML側に id="${idm[1]}" が見つかりません。`,snippet:line,confidence:'high',kind:'dom-id'});
+      const u=rawLine.match(/(?:console\.log|alert|String|Number)\(\s*([A-Za-z_$][\w$]*)\s*\)/); if(u&&!builtins.has(u[1])&&!['message','name','value','data','error','event'].includes(u[1])) addIssue(issues,text,{severity:'MEDIUM',category:'型',line:i+1,title:`未宣言変数の候補: ${u[1]}`,desc:'ASTが利用できないため簡易検出です。この名前が別ファイルやグローバルから提供される場合は無視してください。',snippet:line,confidence:'medium',kind:'undefined-variable'});
+    });
+    const seen=new Map();
+    const eventRe=/([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\.addEventListener\(\s*["']([^"']+)["']\s*,\s*([^)]*)\)/g; let m;
+    while((m=eventRe.exec(text))){const k=m[1]+'|'+m[2]+'|'+m[3].trim();if(seen.has(k)) addIssue(issues,text,{severity:'HIGH',category:'イベント',line:lineAt(text,m.index),title:`${m[2]} イベントが二重登録されています`,desc:'同じ対象・イベント・ハンドラの登録が重複しています。',snippet:getLineText(lines,lineAt(text,m.index)),confidence:'high',kind:'duplicate-event'});else seen.set(k,m.index);}
+    if(/function\s+(?:saveGame|save)\s*\([^)]*\)\s*\{[\s\S]*?(?:localStorage|sessionStorage)\.setItem\s*\(/.test(text)&&!/JSON\.stringify/.test(text)) addIssue(issues,text,{severity:'HIGH',category:'保存',line:lineAt(text,text.indexOf('setItem')),title:'saveGame の保存前に JSON.stringify が見つかりません',desc:'保存対象がオブジェクトならJSON化せずに保存している可能性があります。',snippet:getLineText(lines,lineAt(text,text.indexOf('setItem'))),confidence:'medium',kind:'save-json'});
+    if(/function\s+(?:loadGame|load)\s*\([^)]*\)\s*\{[\s\S]*?(?:localStorage|sessionStorage)\.getItem\s*\([\s\S]*?JSON\.parse\s*\(/.test(text) && !/(?:null|undefined|\?\?)\s*[)|&|{]/.test(text.slice(text.indexOf('getItem'), text.indexOf('}')<0?text.length:text.indexOf('}')))) addIssue(issues,text,{severity:'MEDIUM',category:'保存',line:lineAt(text,text.indexOf('getItem')),title:'loadGame の null 処理を確認してください',desc:'getItem() が null を返すケースを確認してください。',snippet:getLineText(lines,lineAt(text,text.indexOf('getItem'))),confidence:'medium',kind:'load-null'});
+  }
+
+  function checkJSLexicalFallback(text,lines,issues){
+    const masked=maskJS(text), chars=[]; for(let i=0;i<masked.length;i++){const c=masked[i]; if('([{'.includes(c)) chars.push({c,i}); else if(')]}'.includes(c)){const expected={')':'(',']':'[','}':'{'}[c]; const top=chars.pop(); if(!top||top.c!==expected){addIssue(issues,text,{severity:'CRITICAL',category:'構文',line:lineAt(text,i),title:'括弧の対応が取れていません',desc:`${c} に対応する開き括弧がありません。`,snippet:getLineText(lines,lineAt(text,i)),confidence:'high'});break;}}} if(chars.length){const top=chars[chars.length-1]; addIssue(issues,text,{severity:'HIGH',category:'構文',line:lineAt(text,top.i),title:`${top.c} が閉じられていません`,desc:'ASTパーサーが利用できないため、字句レベルで確認できた範囲のみ報告しています。',snippet:getLineText(lines,lineAt(text,top.i)),confidence:'medium'});}
+  }
+
+  /* ---------- Python ---------- */
+  function checkPY(text, lines, issues){
+    // インデントにタブとスペースの混在(Pythonでは特に致命的)
+    let mixedIndentLine = -1;
+    lines.forEach((l,i) => {
+      if (/^\t/.test(l) && lines.some((l2, j) => j!==i && /^    /.test(l2))) mixedIndentLine = i+1;
+    });
+    if (mixedIndentLine > -1){
+      pushIssue(issues, 'error', mixedIndentLine,
+        'インデントにタブとスペースが混在しています',
+        'Pythonはインデントが構文の一部です。タブとスペースを混在させると "TabError" の原因になります。統一してください。',
+        '', 'Python-構文');
+    }
+
+    // コロン抜け(if/for/while/def/class 等)
+    lines.forEach((l,i) => {
+      const codeOnly = l.replace(/#.*$/, '');
+      const trimmed = codeOnly.trim();
+      if (!trimmed) return;
+      const m = trimmed.match(/^(if|elif|else|for|while|def|class|try|except|finally|with)\b/);
+      if (m && !trimmed.endsWith(':') && !/:\s*\S/.test(trimmed)){
+        pushIssue(issues, 'error', i+1,
+          '"' + m[1] + '" 文の末尾にコロン(:)がありません',
+          'Pythonの制御構文(if/for/while/def/class等)は行末にコロンが必要です。',
+          l.trim(), 'Python-構文');
+      }
+    });
+
+    // print文(Python2形式)の検出
+    lines.forEach((l,i) => {
+      const codeOnly = l.replace(/#.*$/, '');
+      if (/\bprint\s+[^\(]/.test(codeOnly) && !/print\s*\(/.test(codeOnly)){
+        pushIssue(issues, 'error', i+1,
+          'Python 2形式のprint文の可能性',
+          'Python 3では print は関数のため、print("text") のように括弧が必要です。',
+          l.trim(), 'Python-互換性');
+      }
+    });
+
+    // 比較に is を使うべき箇所で == None
+    lines.forEach((l,i) => {
+      if (/==\s*None\b/.test(l) || /!=\s*None\b/.test(l)){
+        pushIssue(issues, 'info', i+1,
+          'Noneとの比較には "is" / "is not" を推奨',
+          '"== None" ではなく "is None" を使うのがPythonの慣例(PEP 8)です。',
+          l.trim(), 'Python-スタイル');
+      }
+    });
+
+    // ミュータブルなデフォルト引数
+    const defRe = /def\s+[a-zA-Z_]\w*\s*\(([^)]*)\)\s*:/g;
+    let m;
+    while ((m = defRe.exec(text))){
+      if (/=\s*(\[\]|\{\})/.test(m[1])){
+        pushIssue(issues, 'warning', lineAt(text, m.index),
+          'ミュータブルなデフォルト引数が使われています',
+          'デフォルト引数に [] や {} を直接指定すると、呼び出し間で状態が共有されるバグの典型例です。None をデフォルトにし、関数内で初期化することを推奨します。',
+          getLineText(lines, lineAt(text, m.index)), 'Python-典型的バグ');
+      }
+    }
+
+    // インデント幅の不一致(スペース2と4の混在などのざっくり検知)
+    const indentSizes = new Set();
+    lines.forEach(l => {
+      const m2 = l.match(/^( +)\S/);
+      if (m2) indentSizes.add(m2[1].length % 4 === 0 ? 4 : (m2[1].length % 2 === 0 ? 2 : m2[1].length));
+    });
+
+    // except: の裸(bare except)
+    lines.forEach((l,i) => {
+      const codeOnly = l.replace(/#.*$/, '').trim();
+      if (/^except\s*:\s*$/.test(codeOnly)){
+        pushIssue(issues, 'warning', i+1,
+          '裸の except: が使われています',
+          '全ての例外を無条件に捕捉するため、意図しないエラーまで握りつぶす可能性があります。可能であれば except Exception as e: のように具体化してください。',
+          l.trim(), 'Python-ベストプラクティス');
+      }
+    });
+
+    // 自己代入
+    lines.forEach((l,i) => {
+      const codeOnly = l.replace(/#.*$/, '').trim();
+      const m = codeOnly.match(/^([a-zA-Z_]\w*(?:\.\w+)?)\s*=\s*([a-zA-Z_]\w*(?:\.\w+)?)\s*$/);
+      if (m && m[1] === m[2]){
+        pushIssue(issues, 'warning', i+1,
+          '自己代入の可能性: ' + m[1] + ' = ' + m[2],
+          '変数を自分自身に代入しています。タイプミスの可能性があります。',
+          l.trim(), 'Python-典型的バグ');
+      }
+    });
+
+    // range(len(...)) の後で不要にインデックスアクセスしている典型パターンの検出は誤検出が多いため省略し、
+    // 代わりに連鎖比較の典型ミス (a == b == c ではなく a == b and b == c の意図で書いたつもりが範囲比較になるケース) は
+    // Pythonでは正しく動作するため対象外。ここでは "is" と数値/文字列リテラルの組み合わせミスを検出する。
+    lines.forEach((l,i) => {
+      const codeOnly = l.replace(/#.*$/, '');
+      if (/\bis\s+["']/.test(codeOnly) || /\bis\s+\d/.test(codeOnly) || /\bis not\s+["']/.test(codeOnly)){
+        pushIssue(issues, 'warning', i+1,
+          '"is" でリテラル値を比較している可能性',
+          '文字列や数値リテラルの比較には "==" を使用してください。"is" は同一オブジェクトかどうかの比較であり、値が同じでもFalseになることがあります。',
+          l.trim(), 'Python-典型的バグ');
+      }
+    });
+
+    // 典型的スペルミス
+    const typoMap = { 'improt':'import', 'defien':'define', 'lenght':'length', 'reutrn':'return', 'flase':'False', 'ture':'True', 'elfi':'elif' };
+    Object.keys(typoMap).forEach(bad => {
+      const re = new RegExp('\\b'+bad+'\\b', 'g');
+      let tm;
+      while ((tm = re.exec(text))){
+        pushIssue(issues, 'error', lineAt(text, tm.index),
+          'スペルミスの疑い: "' + bad + '"',
+          '"' + typoMap[bad] + '" の誤字である可能性があります。',
+          getLineText(lines, lineAt(text, tm.index)), 'Python-スペルミス');
+      }
+    });
+  }
+
+  /* ---------- JSON ---------- */
+  function checkJSON(text, lines, issues){
+    try{
+      JSON.parse(text);
+      pushIssue(issues, 'info', 1, 'JSONとして正常にパースできました', '構文エラーは検出されませんでした。', '', 'JSON-構文');
+    }catch(e){
+      const msg = e.message || '';
+      const posMatch = msg.match(/position (\d+)/);
+      let ln = 1;
+      if (posMatch){ ln = lineAt(text, parseInt(posMatch[1],10)); }
+      pushIssue(issues, 'error', ln,
+        'JSONの構文エラー',
+        'パースに失敗しました: ' + msg + ' 。カンマの過不足やクォートの閉じ忘れがないか確認してください。',
+        getLineText(lines, ln), 'JSON-構文');
+    }
+
+    // 末尾カンマの検出(JSON非対応)
+    const trailingCommaRe = /,\s*[\]\}]/g;
+    let m;
+    while ((m = trailingCommaRe.exec(text))){
+      pushIssue(issues, 'error', lineAt(text, m.index),
+        '末尾カンマ(trailing comma)が含まれています',
+        '標準的なJSONでは配列・オブジェクトの最後の要素の後にカンマを置けません。',
+        getLineText(lines, lineAt(text, m.index)), 'JSON-構文');
+    }
+
+    // シングルクォートの使用
+    if (/'[^']*'\s*:/.test(text) || /:\s*'[^']*'/.test(text)){
+      pushIssue(issues, 'error', 1,
+        'シングルクォートが使われている可能性があります',
+        '標準的なJSONではキー・文字列値ともにダブルクォート(")のみが有効です。',
+        '', 'JSON-構文');
+    }
+  }
+
+  /* ================================================================
+     実行 & 描画
+  ================================================================= */
+  const severityMeta={
+    CRITICAL:{label:'CRITICAL',icon:'circle-x'},HIGH:{label:'HIGH',icon:'circle-x'},MEDIUM:{label:'MEDIUM',icon:'triangle'},LOW:{label:'LOW',icon:'info'},INFO:{label:'INFO',icon:'info'}
+  };
+  const langLabel={html:'HTML',css:'CSS',js:'JavaScript',py:'Python',json:'JSON'};
+  function iconSVG(name){switch(name){case'circle-x':return'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/></svg>';case'triangle':return'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';case'info':return'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';case'check':return'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';}return'';}
+  function escapeHTML(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
+
+  function detectLanguage(text,hintExt){
+    const explicit=els.langSelect.value; if(explicit!=='auto')return explicit; if(hintExt)return hintExt;
+    const t=text.trim(); if(/^<!doctype html|<html|<body|<head|<div|<script|<style/i.test(t))return'html';
+    try{if((/^\s*[\[{]/.test(t))){JSON.parse(t);return'json';}}catch(e){}
+    if(/(^|\n)\s*(def |import |from .+ import|print\(|class .+:|elif |except |#!.*python)/.test(t))return'py';
+    if(/[^{}]+\{[^{}]*:[^{}]*;/.test(t)&&!/(function|const |let |var |=>)/.test(t))return'css';
+    return'js';
+  }
+
+  function analyzeMixedDocument(text){
+    const lines=text.split('\n'); const issues=[]; checkCommon(text,lines,issues);
+    const htmlContext=checkHTML(text,lines,issues);
+    const {tags}=scanHTMLTokens(text); const embedded=extractEmbedded(text,tags);
+    // CSS/JS blocks inherit the original line offset so result lines point to the paste.
+    const cssContexts=[]; embedded.styles.forEach(st=>{const sl=st.text.split('\n');const cssIssues=[];checkCSS(st.text,sl,cssIssues,htmlContext);cssIssues.forEach(x=>{x.line+=st.line-1;issues.push(x);});cssContexts.push(st);});
+    const allEventRegs=[]; embedded.scripts.forEach(sc=>{const sr=sc.text.split('\n'); const local=[]; const a=checkJS(sc.text,sr,local,{...htmlContext,eventRegs:allEventRegs,domSelectors:true}); local.forEach(x=>{x.line+=sc.line-1;issues.push(x);}); if(a.facts?.eventRegs) allEventRegs.push(...a.facts.eventRegs);});
+    // Inline onclick handlers.
+    for(const h of htmlContext.inlineHandlers){const names=[...h.code.matchAll(/(?:^|[^\w$])([A-Za-z_$][\w$]*)\s*\(/g)].map(m=>m[1]); if(names.length) for(const name of names){} }
+    // Cross-reference for classList and id strings is handled when JS blocks are parsed.
+    return {issues,htmlContext};
+  }
+
+  function dedupeIssues(issues){
+    const out=[]; const keyMap=new Map();
+    for(const x of issues){
+      // same root cause / same normalized title+line => one issue
+      const key=[x.line,x.severity,x.category,x.kind||x.title.replace(/\d+/g,'#')].join('|');
+      if(keyMap.has(key)){const existing=keyMap.get(key); if(x.secondary&&!existing.secondary) continue; continue;}
+      keyMap.set(key,x); out.push(x);
+    }
+    return out.sort((a,b)=>SEVERITY_RANK[a.severity]-SEVERITY_RANK[b.severity]||a.line-b.line);
+  }
+
+  function runSelfTests(){
+    const cases=[
+      ['正常HTML meta viewport','<meta name="viewport" content="width=device-width, initial-scale=1.0">','html',false],
+      ['HTML文字列混在','const message="<div><span>Hello</span></div>"; log.innerHTML += message;','js',false],
+      ['未定義変数','console.log(unknownGameValue);','js',true],
+      ['id typo','<button id="attackBtn" type="button"></button><script>const b=document.getElementById("attackButton");<\/script>','html',true],
+      ['代入比較混同','if(kills = 3){}','js',true],
+      ['配列ランダム範囲','Math.floor(Math.random() * enemies.length + 1)','js',true],
+      ['文字列加算','gold += "50";','js',true],
+      ['無意味減算','xp - 100;','js',true],
+      ['method reference','localStorage.clear;','js',true],
+      ['構文エラー','function regexBug(){ return /[/; }','js',true],
+      ['正常template literal','const s=`<div>${name}</div>`;','js',false],
+      ['正常typeof null','if (typeof model === "undefined" || model === null) {}','js',false],
+      ['二重attackイベント','button.addEventListener("click", attack);\nbutton.addEventListener("click", attack);','js',true],
+      ['saveGame JSON不足','function saveGame(){ localStorage.setItem("game", state); }','js',true],
+      ['loadGame null不足','function loadGame(){ const s=localStorage.getItem("game"); return JSON.parse(s); }','js',true]
+    ];
+    const results=[]; cases.forEach(([name,code,lang,expected])=>{const iss=[];if(lang==='html'){const lines=code.split('\n');const ctx=checkHTML(code,lines,iss);const emb=extractEmbedded(code,scanHTMLTokens(code).tags);emb.scripts.forEach(sc=>checkJS(sc.text,sc.text.split('\n'),iss,{...ctx,ids:ctx.ids,classes:ctx.classes,eventRegs:[],domSelectors:true}));}else{const lines=code.split('\n');if(lang==='js')checkJS(code,lines,iss,{ids:new Set(),classes:new Set(),eventRegs:[],domSelectors:true});} const found=iss.length>0; results.push({name,expected,pass:expected===found,found,issues:iss.map(i=>i.title)});});
+    console.table(results); return results;
+  }
+
+  function runScan(){
+    const text=currentText(); if(!text.trim())return;
+    const lang=detectLanguage(text,state.mode==='file'?els.dropzone.dataset.detected:null);
+    let issues=[];
+    if(lang==='html'){const mixed=analyzeMixedDocument(text);issues=mixed.issues;}
+    else{const lines=text.split('\n');checkCommon(text,lines,issues);if(lang==='css')checkCSS(text,lines,issues);else if(lang==='js')checkJS(text,lines,issues,{ids:new Set(),classes:new Set(),eventRegs:[],domSelectors:true});else if(lang==='py')checkPY(text,lines,issues);else if(lang==='json')checkJSON(text,lines,issues);}
+    issues=dedupeIssues(issues); renderResults(issues,lang);
+  }
+
+  function renderResults(issues,lang){
+    els.results.classList.add('show');
+    const counts={CRITICAL:0,HIGH:0,MEDIUM:0,LOW:0,INFO:0}; issues.forEach(x=>counts[x.severity]++);
+    let summary='<span class="sum-pill info">検査モード: '+(langLabel[lang]||lang)+'</span>';
+    Object.keys(counts).forEach(k=>{if(counts[k])summary+=`<span class="sum-pill ${k==='CRITICAL'||k==='HIGH'?'err':k==='MEDIUM'?'warn':k==='LOW'?'info':'info'}">${k} ${counts[k]}件</span>`;});
+    if(!issues.length)summary+='<span class="sum-pill ok">'+iconSVG('check')+' 検出なし</span>';
+    els.summaryStrip.innerHTML=summary;
+    if(!issues.length){els.resultsBody.innerHTML='<div class="clean-msg">'+iconSVG('check')+'<div>今回の静的解析では、明確な問題は見つかりませんでした。</div><small>「可能性あり」の推測を無理にエラーへ格上げしていません。</small></div>';return;}
+    const list=issues.map(x=>{const meta=severityMeta[x.severity]||severityMeta.INFO;return `<div class="issue sev-${x.severity.toLowerCase()} ${x.secondary?'secondary':''}">
+      <div class="issue-sev">${iconSVG(meta.icon)}</div>
+      <div class="issue-line"><span class="num">${x.line}</span>行目</div>
+      <div class="issue-body">
+        <div class="issue-topline"><span class="issue-severity">${escapeHTML(x.severity)}</span><span class="issue-category">${escapeHTML(x.category)}</span>${x.confidence==='medium'||x.confidence==='low'?'<span class="issue-confidence">可能性あり</span>':''}</div>
+        <div class="issue-title">${escapeHTML(x.title)}</div>
+        <div class="issue-desc">${escapeHTML(x.desc)}</div>
+        ${x.snippet?'<div class="issue-code">'+escapeHTML(x.snippet)+'</div>':''}
+        ${x.fixBefore?'<div class="fix-block"><b>修正前</b><code>'+escapeHTML(x.fixBefore)+'</code><b>修正後</b><code>'+escapeHTML(x.fixAfter)+'</code></div>':''}
+      </div></div>`;}).join('');
+    els.resultsBody.innerHTML='<div class="issue-list">'+list+'</div>';
+  }
+
+  els.runBtn.addEventListener('click', runScan);
+
+  // Ctrl/Cmd + Enter でも実行
+  els.codeInput.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !els.runBtn.disabled){
+      runScan();
+    }
+  });
+
+  updateRunState();
+  window.__LINT_BENCH_SELF_TEST__ = runSelfTests;
+})();
+</script>
+
+</body>
+</html>
