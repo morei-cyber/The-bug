@@ -491,6 +491,18 @@
   @media (prefers-reduced-motion: reduce){
     *{transition:none !important;}
   }
+
+  .ai-panel{margin-top:14px;padding:14px 16px;border:1px solid var(--line);background:var(--bg-2);border-radius:6px}
+  .ai-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .ai-row label{font-size:12px;color:var(--text-lo)}
+  .ai-row input,.ai-row select{background:var(--bg-1);color:var(--text-hi);border:1px solid var(--line);border-radius:4px;padding:7px 9px;font-family:var(--mono);font-size:12px}
+  .ai-btn{font-family:var(--sans);font-weight:700;font-size:13px;color:var(--bg-0);background:var(--info);border:none;border-radius:var(--radius);padding:9px 14px;cursor:pointer}
+  .ai-btn:disabled{background:var(--bg-3);color:var(--text-lo);cursor:not-allowed}
+  .ai-status{font-family:var(--mono);font-size:11px;color:var(--text-lo);margin-top:8px}
+  .ai-card{margin-top:14px;padding:14px 16px;background:var(--bg-1);border:1px solid var(--line);border-radius:6px}
+  .ai-card h3{font-size:14px;margin:0 0 8px}
+  .ai-card pre{white-space:pre-wrap;overflow:auto;background:var(--bg-0);padding:10px;border-radius:4px;border:1px solid var(--line);font:12px/1.6 var(--mono);color:var(--text-mid)}
+
 </style>
 </head>
 <body>
@@ -581,6 +593,23 @@
     <span class="run-meta" id="runMeta">コードを入力すると実行できます</span>
   </div>
 
+  <div class="ai-panel">
+    <div class="panel-head" style="margin:-14px -16px 12px;border-radius:6px 6px 0 0;">
+      <span class="ptitle">AI SECOND OPINION / MULTI-PASS VERIFICATION</span>
+      <span class="ptitle">Static findings → AI analyst → adversarial verifier → judge</span>
+    </div>
+    <div class="ai-row">
+      <label for="aiEndpoint">AI Bridge</label>
+      <input id="aiEndpoint" value="http://localhost:8787/api/review" size="34" spellcheck="false">
+      <label for="aiModel">Model</label>
+      <input id="aiModel" value="gpt-5.6-sol" size="16" spellcheck="false">
+      <label for="aiPasses">Passes</label>
+      <select id="aiPasses"><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option></select>
+      <button class="ai-btn" id="aiReviewBtn" type="button" disabled>AIで再検証する</button>
+    </div>
+    <div class="ai-status" id="aiStatus">ローカルAI Bridge未接続。通常の静的解析はそのまま利用できます。</div>
+  </div>
+
   <section id="results">
     <div class="results-head">
       <h2>検査結果 <span class="en">SCAN RESULT</span></h2>
@@ -590,7 +619,7 @@
   </section>
 
   <footer class="note">
-    ※ JavaScriptはAcorn AST解析を優先し、構文エラー時も他言語・他ブロックの解析を継続します。確実なエラーと「可能性あり」の警告を分離し、HTML/CSS/JSの相互参照も検査します。コード本体は外部送信しません（解析ライブラリAcornはCDNから読み込みます）。
+    ※ 通常の静的解析はブラウザ内で実行します。AI再検証を有効にした場合のみ、設定したAI Bridgeへコードと解析結果を送信します。APIキーはブラウザへ埋め込まず、Bridge側の環境変数で管理してください。
   </footer>
 
 </div>
@@ -618,12 +647,19 @@
     results: document.getElementById('results'),
     summaryStrip: document.getElementById('summaryStrip'),
     resultsBody: document.getElementById('resultsBody'),
+    aiEndpoint: document.getElementById('aiEndpoint'),
+    aiModel: document.getElementById('aiModel'),
+    aiPasses: document.getElementById('aiPasses'),
+    aiReviewBtn: document.getElementById('aiReviewBtn'),
+    aiStatus: document.getElementById('aiStatus'),
   };
 
   let state = {
     mode: 'paste',   // paste | file
     fileText: '',
     fileName: '',
+    lastScan: null,
+    lastAI: null,
   };
 
   /* ---------------- タブ切替 ---------------- */
@@ -1901,6 +1937,9 @@
   function runScan(){
     const text=currentText(); if(!text.trim())return;
     const hintExt=els.dropzone.dataset.detected; const result=runScanText(text,null,state.mode==='file'?hintExt:null);
+    state.lastScan=result;
+    els.aiReviewBtn.disabled=false;
+    els.aiStatus.textContent='静的解析完了。AIで独立検証できます。';
     renderResults(result.issues,result.lang,result.parser);
   }
 
@@ -1943,6 +1982,78 @@
   }
 
   // Public API + self test suite for regression testing.
+  /* ================================================================
+     AI SECOND OPINION
+     Browser never stores an API key. The bridge receives code + static
+     evidence and performs multi-pass analyst / adversary / judge review.
+  ================================================================= */
+  function buildAIPacket(){
+    const text=currentText();
+    const scan=state.lastScan || runScanText(text,null,state.mode==='file'?els.dropzone.dataset.detected:null);
+    const compactIssues=(scan.issues||[]).slice(0,200).map(i=>({
+      line:i.line,kind:i.kind,severity:i.severity,confidence:i.confidence,
+      title:i.title,desc:i.desc,snippet:i.snippet||'',evidence:(i.evidence||[]).map(e=>e.type)
+    }));
+    return {
+      version:'5.0', language:scan.lang, parser:scan.parser,
+      code:text, staticFindings:compactIssues,
+      policy:{
+        neverTreatStyleAsBug:true,
+        requireCounterexampleForPossible:false,
+        prioritizeTruePositives:true,
+        preserveSourceLineNumbers:true,
+        distinguishCertainVsPossible:true,
+        categories:['Syntax','Logic Bug','Type','DOM','HTML','CSS','Event','Async','Storage','Game State','Security','Performance']
+      }
+    };
+  }
+
+  function renderAIResult(data){
+    const old=document.getElementById('aiResultCard'); if(old) old.remove();
+    const box=document.createElement('div'); box.className='ai-card'; box.id='aiResultCard';
+    const summary=String(data.summary||data.judgment||'AIレビュー完了');
+    let html='<h3>AI検証結果</h3><div class="issue-desc">'+escapeHTML(summary)+'</div>';
+    if(Array.isArray(data.findings) && data.findings.length){
+      html+='<div class="issue-list" style="margin-top:10px">';
+      for(const f of data.findings){
+        html+='<div class="issue sev-'+String(f.severity||'MEDIUM').toLowerCase()+'"><div></div><div class="issue-line"><span class="num">'+escapeHTML(f.line??'?')+'</span>行目</div><div class="issue-body">';
+        html+='<div class="issue-meta"><span>種類: '+escapeHTML(f.kind||'AI')+'</span><span>重要度: '+escapeHTML(f.severity||'MEDIUM')+'</span><span>AI確度: '+escapeHTML(f.confidence||'POSSIBLE')+'</span></div>';
+        html+='<div class="issue-title">'+escapeHTML(f.title||'')+'</div>';
+        html+='<div class="issue-desc">'+escapeHTML(f.reason||f.desc||'')+'</div>';
+        if(f.before) html+='<div class="issue-section"><strong>修正前:</strong> <code>'+escapeHTML(f.before)+'</code></div>';
+        if(f.after) html+='<div class="issue-section"><strong>修正後候補:</strong> <code>'+escapeHTML(f.after)+'</code></div>';
+        if(f.counterexample) html+='<div class="issue-section"><strong>反証チェック:</strong> '+escapeHTML(f.counterexample)+'</div>';
+        html+='</div></div>';
+      }
+      html+='</div>';
+    }
+    if(data.rejected && data.rejected.length){ html+='<div class="issue-section" style="margin-top:10px"><strong>AIが誤検出候補として除外:</strong> '+escapeHTML(data.rejected.join(' / '))+'</div>'; }
+    if(data.stats) html+='<div class="ai-status">'+escapeHTML(JSON.stringify(data.stats))+'</div>';
+    if(data.raw && !data.findings){ html+='<pre>'+escapeHTML(data.raw)+'</pre>'; }
+    box.innerHTML=html;
+    els.resultsBody.prepend(box);
+  }
+
+  async function runAIReview(){
+    const text=currentText(); if(!text.trim())return;
+    els.aiReviewBtn.disabled=true; els.aiStatus.textContent='AI検証中… 静的解析結果を独立レビューしています。';
+    try{
+      const packet=buildAIPacket();
+      const res=await fetch(els.aiEndpoint.value.trim()||'/api/review',{
+        method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+          ...packet, model:els.aiModel.value.trim()||'gpt-5.6-sol', passes:Number(els.aiPasses.value)||2
+        })
+      });
+      const data=await res.json();
+      if(!res.ok) throw new Error(data.error||('HTTP '+res.status));
+      state.lastAI=data; renderAIResult(data);
+      els.aiStatus.textContent='AI検証完了。静的解析との突き合わせ結果を表示しています。';
+    }catch(err){
+      els.aiStatus.textContent='AI Bridgeに接続できません: '+err.message;
+    }finally{ els.aiReviewBtn.disabled=false; }
+  }
+  els.aiReviewBtn.addEventListener('click',runAIReview);
+
   function runSelfTests(){
     const tests=[]; const add=(name,should,fn)=>{const r=fn();tests.push({name,passed:should?r.ok:!r.ok,detail:r.detail||''});};
     const has=(issues,rx)=>issues.some(x=>rx.test(x.title+' '+x.desc));
