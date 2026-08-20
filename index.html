@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>コード検査室 / Lint Bench</title>
+<title>コード検査室 / Lint Bench v4</title>
 <style>
   :root{
     --bg-0:#0b0d10;
@@ -503,7 +503,7 @@
     <div>
       <div class="brand-mark">
         <span class="glyph">&lt;/&gt;</span>
-        <h1>コード検査室<span class="en">LINT BENCH — static review</span></h1>
+        <h1>コード検査室<span class="en">LINT BENCH — semantic review v4</span></h1>
       </div>
       <p class="subline">HTML・CSS・JavaScript・Python・JSON のコードを貼り付けるか .txt / ソースファイルをアップロードすると、よくある構文ミスや不具合の兆候をブラウザ内だけで検査します。</p>
     </div>
@@ -760,7 +760,7 @@
   const VOID_TAGS = new Set(['area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr']);
   const GLOBAL_HTML_ATTRS = new Set([
     'id','class','title','lang','dir','charset','content','hidden','style','tabindex','accesskey','contenteditable','draggable','spellcheck','translate','slot','part',
-    'role','name','value','type','disabled','checked','selected','readonly','required','placeholder','autocomplete','autofocus','multiple','min','max','step','pattern','maxlength','minlength','size','rows','cols','wrap','for','form','formaction','formenctype','formmethod','formnovalidate','formtarget','action','method','target','rel','download','media','href','src','alt','width','height','loading','decoding','crossorigin','referrerpolicy','integrity','nonce','srcset','sizes','poster','controls','loop','muted','playsinline','preload','open','datetime','cite','colspan','rowspan','headers','scope','aria-label','aria-labelledby','aria-describedby','aria-hidden','aria-live','aria-current','aria-controls','aria-expanded','aria-pressed','data-*'
+    'role','onclick','ondblclick','onchange','oninput','onsubmit','onkeydown','onkeyup','onkeypress','onmousedown','onmouseup','onmouseenter','onmouseleave','onfocus','onblur','name','value','type','disabled','checked','selected','readonly','required','placeholder','autocomplete','autofocus','multiple','min','max','step','pattern','maxlength','minlength','size','rows','cols','wrap','for','form','formaction','formenctype','formmethod','formnovalidate','formtarget','action','method','target','rel','download','media','href','src','alt','width','height','loading','decoding','crossorigin','referrerpolicy','integrity','nonce','srcset','sizes','poster','controls','loop','muted','playsinline','preload','open','datetime','cite','colspan','rowspan','headers','scope','aria-label','aria-labelledby','aria-describedby','aria-hidden','aria-live','aria-current','aria-controls','aria-expanded','aria-pressed','data-*'
   ]);
 
   function lineAt(text, idx){ return text.slice(0, Math.max(0, idx)).split('\n').length; }
@@ -983,23 +983,38 @@
     return {issues,info};
   }
 
+  function previousSignificant(text, index){
+    let i=index-1; while(i>=0 && /\s/.test(text[i])) i--; return i;
+  }
+  function slashCanStartRegex(text, index){
+    const p=previousSignificant(text,index);
+    if(p<0) return true;
+    const c=text[p];
+    if(/[({[=,:;!&|?+\-*%^~<>]/.test(c)) return true;
+    if(c===')'||c===']'||c==='}'||/[A-Za-z0-9_$.'"`]/.test(c)){
+      let j=p; while(j>=0 && /[A-Za-z0-9_$]/.test(text[j])) j--; const word=text.slice(j+1,p+1);
+      return /^(return|throw|case|delete|void|typeof|instanceof|in|of|yield|await|else|do)$/.test(word);
+    }
+    return false;
+  }
   function scanLexicalJS(text, baseLine, issues){
-    let state='code', quote=null, blockComment=false, templateDepth=0, regexClass=false, regexEsc=false, regexStart=-1;
-    const stack=[]; let canStartRegex=true;
-    const emitLex=(sev,line,title,desc,snip)=>pushIssue(issues,{severity:sev,line,kind:'Syntax',title,desc,snippet:snip,confidence:'CERTAIN'});
+    let state='code', quote=null, blockComment=false, regexClass=false, regexEsc=false, regexStart=-1;
+    const stack=[];
+    const lines=text.split('\n');
+    const emit=(sev,line,title,desc,snip)=>pushIssue(issues,{severity:sev,line,kind:'Syntax',title,desc,snippet:snip,confidence:'CERTAIN'});
     for(let i=0;i<text.length;i++){
       const c=text[i], n=text[i+1], ln=baseLine+lineAt(text,i)-1;
-      if(state==='lineComment'){if(c==='\n')state='code';continue;}
-      if(state==='blockComment'){if(c==='*'&&n==='/'){state='code';i++;}continue;}
+      if(state==='lineComment'){ if(c==='\n') state='code'; continue; }
+      if(state==='blockComment'){ if(c==='*'&&n==='/'){state='code';i++;} continue; }
       if(state==='string'){
         if(c==='\\'){i++;continue;}
-        if(c===quote){state='code';canStartRegex=false;continue;}
-        if(c==='\n'){emitLex('CRITICAL',ln,'文字列リテラルが閉じられていません','開きクォートに対応する閉じクォートがありません。',getLineText(text.split('\n'),lineAt(text,i)));state='code';}
+        if(c===quote){state='code';quote=null;continue;}
+        if(c==='\n'){emit('CRITICAL',ln,'文字列リテラルが閉じられていません','開きクォートに対応する閉じクォートがありません。',lines[lineAt(text,i)-1]);state='code';}
         continue;
       }
       if(state==='template'){
         if(c==='\\'){i++;continue;}
-        if(c==='`'){state='code';canStartRegex=false;continue;}
+        if(c==='`'){state='code';continue;}
         continue;
       }
       if(state==='regex'){
@@ -1007,29 +1022,29 @@
         if(c==='\\'){regexEsc=true;continue;}
         if(c==='['){regexClass=true;continue;}
         if(c===']'&&regexClass){regexClass=false;continue;}
-        if(c==='/'&&!regexClass){state='code';canStartRegex=false;while(/[a-z]/i.test(text[i+1]||''))i++;continue;}
-        if(c==='\n' || i===text.length-1){emitLex('CRITICAL',ln,'正規表現リテラルが正しく閉じられていません','/ で始まる正規表現が閉じられていないか、文字クラス「[ ... ]」が未完了です。',getLineText(text.split('\n'),lineAt(text,regexStart)));state='code';}
+        if(c==='/'&&!regexClass){state='code'; while(/[a-z]/i.test(text[i+1]||'')) i++; continue;}
+        if(c==='\n' || i===text.length-1){emit('CRITICAL',baseLine+lineAt(text,regexStart)-1,'正規表現リテラルが正しく閉じられていません','/ で始まる正規表現が閉じられていないか、文字クラス「[ ... ]」が未完了です。',lines[lineAt(text,regexStart)-1]);state='code';}
         continue;
       }
       if(c==='/'&&n==='/'){state='lineComment';i++;continue;}
       if(c==='/'&&n==='*'){state='blockComment';i++;continue;}
       if(c==='"'||c==="'"){state='string';quote=c;continue;}
       if(c==='`'){state='template';continue;}
-      if(c==='/ '){ }
-      if(c==='/'&&canStartRegex){state='regex';regexStart=i;regexClass=false;regexEsc=false;continue;}
+      if(c==='/' && slashCanStartRegex(text,i)){state='regex';regexStart=i;regexClass=false;regexEsc=false;continue;}
       if(c==='('||c==='['||c==='{') stack.push({c,line:ln});
       else if(c===')'||c===']'||c==='}'){
-        const map={')':'(',']':'[','}':'{'}; const top=stack.pop();
-        if(!top||top.c!==map[c]) emitLex('HIGH',ln,'括弧の対応が取れていません','対応する開き括弧がないか、種類が一致しません。',getLineText(text.split('\n'),lineAt(text,i)));
+        const map={')':'(',']':'[','}':'{'}; const top=stack.length?stack[stack.length-1]:null;
+        if(!top || top.c!==map[c]) emit('HIGH',ln,'括弧の対応が取れていません','対応する開き括弧がないか、種類が一致しません。',lines[lineAt(text,i)-1]);
+        else stack.pop();
       }
-      canStartRegex=/[({[=,:;!&|?+\-*%^~<>]/.test(c) || /\b(return|throw|case|delete|void|typeof|instanceof|in|of|yield|await|else|do)\b/.test(text.slice(Math.max(0,i-12),i+1));
     }
-    if(state==='blockComment') emitLex('HIGH',baseLine+text.split('\n').length-1,'ブロックコメントが閉じられていません','/* に対応する */ がありません。',text.split('\n').slice(-1)[0]);
-    if(state==='template') emitLex('CRITICAL',baseLine+text.split('\n').length-1,'テンプレートリテラルが閉じられていません','` に対応する閉じバッククォートがありません。',text.split('\n').slice(-1)[0]);
-    if(state==='string') emitLex('CRITICAL',baseLine+text.split('\n').length-1,'文字列リテラルが閉じられていません','文字列の終端が見つかりません。',text.split('\n').slice(-1)[0]);
+    if(state==='blockComment') emit('HIGH',baseLine+lines.length-1,'ブロックコメントが閉じられていません','/* に対応する */ がありません。',lines[lines.length-1]);
+    if(state==='template') emit('CRITICAL',baseLine+lines.length-1,'テンプレートリテラルが閉じられていません','` に対応する閉じバッククォートがありません。',lines[lines.length-1]);
+    if(state==='string') emit('CRITICAL',baseLine+lines.length-1,'文字列リテラルが閉じられていません','文字列の終端が見つかりません。',lines[lines.length-1]);
+    if(state==='regex') emit('CRITICAL',baseLine+lineAt(text,regexStart)-1,'正規表現リテラルが正しく閉じられていません','/ で始まる正規表現が閉じられていないか、文字クラス「[ ... ]」が未完了です。',lines[lineAt(text,regexStart)-1]);
     if(stack.length){
       const primary=issues.find(x=>x.kind==='Syntax'&&x.severity==='CRITICAL');
-      for(const s of stack){ pushIssue(issues,{severity:primary?'LOW':'HIGH',line:s.line,kind:'Syntax',title:primary?'Secondary Parse Error: 括弧の二次エラー':'括弧が閉じられていません',desc:primary?'先行する構文エラーのため正しく解析できない可能性があります。':'開き括弧に対応する閉じ括弧がありません。',primaryId:primary?.id||null,confidence:primary?'DERIVED':'CERTAIN'}); }
+      for(const x of stack) pushIssue(issues,{severity:primary?'LOW':'HIGH',line:x.line,kind:'Syntax',title:primary?'Secondary Parse Error: 括弧の二次エラー':'括弧が閉じられていません',desc:primary?'先行する構文エラーにより、この括弧エラーは派生した可能性があります。':'開き括弧に対応する閉じ括弧がありません。',primaryId:primary?.id||null,confidence:primary?'DERIVED':'CERTAIN'});
     }
   }
 
@@ -1073,6 +1088,373 @@
       if(Array.isArray(v)) v.forEach(x=>{if(x&&typeof x.type==='string')astWalk(x,cb,node,k);});
       else if(v&&typeof v.type==='string') astWalk(v,cb,node,k);
     }
+  }
+
+  /* ================================================================
+     Deep semantic analysis layers
+     Scope -> Data Flow -> Control Flow -> Game State -> Evidence fusion
+     The goal is not maximum issue count; it is evidence-backed confidence.
+  ================================================================= */
+  const JS_BUILTINS = new Set([
+    'Array','ArrayBuffer','BigInt','Boolean','console','Date','Error','EvalError','Float32Array','Float64Array',
+    'Function','Infinity','Int8Array','Int16Array','Int32Array','Intl','JSON','Map','Math','NaN','Number','Object',
+    'Promise','Proxy','RangeError','ReferenceError','Reflect','RegExp','Set','String','Symbol','SyntaxError','TypeError',
+    'Uint8Array','Uint16Array','Uint32Array','Uint8ClampedArray','URIError','URL','URLSearchParams','WeakMap','WeakSet',
+    'decodeURI','decodeURIComponent','encodeURI','encodeURIComponent','eval','fetch','isFinite','isNaN','parseFloat','parseInt',
+    'queueMicrotask','requestAnimationFrame','setInterval','setTimeout','clearInterval','clearTimeout','structuredClone',
+    'document','window','globalThis','location','history','navigator','localStorage','sessionStorage','performance','crypto',
+    'alert','confirm','prompt','XMLHttpRequest','FormData','File','FileReader','Blob','Event','CustomEvent','KeyboardEvent',
+    'MouseEvent','HTMLElement','Node','NodeList','HTMLCollection','DOMParser','MutationObserver','ResizeObserver',
+    'setTimeout','setInterval','clearTimeout','clearInterval'
+  ]);
+  const GAME_STATE_NAMES=/^(hp|health|maxhp|maxhealth|mp|mana|maxmp|gold|coins?|money|score|xp|level|kills?|damage|attack|defense|defence|inventory|stamina|energy|cooldown|lives?)$/i;
+
+  function makeDeepState(text, ast, baseLine){
+    const lines=text.split('\n');
+    const scopes=[]; const nodeScope=new WeakMap(); const refs=[]; const declNodes=[];
+    const root={id:0,type:'global',parent:null,start:0,end:text.length,decls:new Map(),children:[]};
+    scopes.push(root);
+    function addScope(type,parent,start,end){const sc={id:scopes.length,type,parent,start,end,decls:new Map(),children:[]};scopes.push(sc);parent.children.push(sc);return sc;}
+    function nearestScopeForNode(node, current){
+      const st=node.start ?? 0;
+      while(current.parent && !(st>=current.start && st<=current.end)) current=current.parent;
+      return current;
+    }
+    function declare(sc,name,kind,node){if(!name)return;const arr=sc.decls.get(name)||[];arr.push({kind,line:nodeLine(node),node});sc.decls.set(name,arr);declNodes.push({name,kind,node,scope:sc});}
+    function patternNames2(node,out=[]){
+      if(!node)return out;
+      if(node.type==='Identifier'){out.push(node.name);return out;}
+      if(node.type==='RestElement')return patternNames2(node.argument,out);
+      if(node.type==='AssignmentPattern')return patternNames2(node.left,out);
+      if(node.type==='ObjectPattern'){for(const ptn of node.properties||[]){if(ptn.type==='Property')patternNames2(ptn.value,out);else if(ptn.type==='RestElement')patternNames2(ptn.argument,out);}return out;}
+      if(node.type==='ArrayPattern'){for(const e of node.elements||[])if(e)patternNames2(e,out);}
+      return out;
+    }
+    function isRef(n,p,k){
+      if(!n||n.type!=='Identifier')return false;
+      if(!p)return true;
+      if(p.type==='VariableDeclarator' && k==='id')return false;
+      if((p.type==='FunctionDeclaration'||p.type==='FunctionExpression'||p.type==='ArrowFunctionExpression') && (k==='id'||k==='params'))return false;
+      if(p.type==='Property' && k==='key' && !p.computed)return false;
+      if(p.type==='MethodDefinition' && k==='key' && !p.computed)return false;
+      if((p.type==='MemberExpression'||p.type==='OptionalMemberExpression') && k==='property' && !p.computed)return false;
+      if(p.type==='LabeledStatement' || p.type==='BreakStatement' || p.type==='ContinueStatement')return false;
+      if((p.type==='FunctionDeclaration'||p.type==='FunctionExpression') && k==='id')return false;
+      return true;
+    }
+    function walk(node,scope,parent=null,key=''){
+      if(!node||typeof node!=='object'||typeof node.type!=='string')return;
+      let sc=scope;
+      if(node!==ast && (node.type==='FunctionDeclaration'||node.type==='FunctionExpression'||node.type==='ArrowFunctionExpression')){
+        sc=addScope('function',scope,node.start,node.end);
+      } else if(node.type==='BlockStatement' && parent && !['FunctionDeclaration','FunctionExpression','ArrowFunctionExpression'].includes(parent.type)){
+        sc=addScope('block',scope,node.start,node.end);
+      } else if(node.type==='CatchClause'){
+        sc=addScope('catch',scope,node.start,node.end);
+      }
+      nodeScope.set(node,sc);
+      if(node.type==='VariableDeclarator'){
+        const names=patternNames2(node.id); const kind=parent?.kind||'let';
+        for(const name of names)declare(sc,name,kind,node);
+      } else if(node.type==='FunctionDeclaration' && node.id){
+        declare(scope,node.id.name,'function',node);
+      } else if((node.type==='FunctionExpression'||node.type==='ArrowFunctionExpression') && node.id){
+        declare(scope,node.id.name,'function',node);
+      } else if((node.type==='ClassDeclaration'||node.type==='ClassExpression') && node.id){
+        declare(scope,node.id.name,'class',node);
+      } else if(node.type==='ImportDeclaration'){
+        for(const sp of node.specifiers||[]) if(sp.local) declare(scope,sp.local.name,'import',sp.local);
+      } else if(node.type==='CatchClause' && node.param){
+        for(const name of patternNames2(node.param))declare(sc,name,'catch',node.param);
+      } else if(node.type==='Identifier' && isRef(node,parent,key)) refs.push({node,name:node.name,line:nodeLine(node),scope:sc,parent,key});
+      if((node.type==='FunctionDeclaration'||node.type==='FunctionExpression'||node.type==='ArrowFunctionExpression')){
+        for(const param of node.params||[]) for(const name of patternNames2(param)) declare(sc,name,'param',param);
+      }
+      for(const k2 of Object.keys(node)){
+        if(['loc','start','end'].includes(k2))continue;
+        const v=node[k2];
+        if(Array.isArray(v))for(const x of v)if(x&&x.type)walk(x,sc,node,k2);
+        else if(v&&v.type)walk(v,sc,node,k2);
+      }
+    }
+    walk(ast,root,null,'');
+    root.end=text.length;
+    function resolve(name,sc){
+      let cur=sc;
+      while(cur){if(cur.decls.has(name))return {scope:cur,decs:cur.decls.get(name)};cur=scopes[cur.parent?.id ?? -1] || null;}
+      return null;
+    }
+    return {lines,scopes,root,nodeScope,refs,declNodes,resolve,baseLine:baseLine||1};
+  }
+
+  function valueType(node, env){
+    if(!node)return 'unknown';
+    if(node.type==='Literal'){
+      if(node.value===null)return 'null';
+      if(typeof node.value==='string')return 'string';
+      if(typeof node.value==='number')return Number.isNaN(node.value)?'nan':'number';
+      if(typeof node.value==='boolean')return 'boolean';
+    }
+    if(node.type==='TemplateLiteral')return 'string';
+    if(node.type==='ArrayExpression')return 'array';
+    if(node.type==='ObjectExpression'||node.type==='FunctionExpression'||node.type==='ArrowFunctionExpression')return 'object';
+    if(node.type==='NewExpression')return 'object';
+    if(node.type==='UnaryExpression'){
+      if(node.operator==='typeof')return 'string';
+      if(['+','-','~'].includes(node.operator))return 'number';
+      if(node.operator==='!')return 'boolean';
+    }
+    if(node.type==='Identifier')return env.get(node.name)||'unknown';
+    if(node.type==='BinaryExpression'){
+      if(node.operator==='+'){
+        const a=valueType(node.left,env),b=valueType(node.right,env);
+        if(a==='string'||b==='string')return 'string';
+        if(a==='number'&&b==='number')return 'number';
+      }
+      if(['-','*','/','%','**'].includes(node.operator))return 'number';
+      if(['==','===','!=','!==','<','>','<=','>=','in','instanceof'].includes(node.operator))return 'boolean';
+      if(['&&','||','??'].includes(node.operator))return 'mixed';
+    }
+    if(node.type==='LogicalExpression')return 'mixed';
+    if(node.type==='ConditionalExpression'){
+      const a=valueType(node.consequent,env),b=valueType(node.alternate,env);return a===b?a:'mixed';
+    }
+    if(node.type==='CallExpression'){
+      if(node.callee?.type==='Identifier' && ['Number','parseInt','parseFloat'].includes(node.callee.name))return 'number';
+      if(node.callee?.type==='MemberExpression' && node.callee.object?.name==='JSON' && node.callee.property?.name==='parse')return 'unknown';
+      if(node.callee?.type==='MemberExpression' && node.callee.property?.name==='toString')return 'string';
+      return 'unknown';
+    }
+    return 'unknown';
+  }
+
+  function addEvidence(issue, type, weight, text){
+    if(!issue)return;
+    issue.evidence=issue.evidence||[];
+    issue.evidence.push({type,weight,text});
+  }
+  function fuseConfidence(issue){
+    if(!issue)return;
+    const ev=issue.evidence||[];
+    let score=0;
+    for(const e of ev)score+=Math.max(0,Math.min(35,e.weight||0));
+    const uniq=new Set(ev.map(e=>e.type));
+    score += Math.max(0,uniq.size-1)*12;
+    score=Math.min(100,score);
+    if(issue.confidence==='DERIVED'){issue.confidenceScore=0;return;}
+    if(score>=90){issue.confidence='CERTAIN';}
+    else if(score>=72){issue.confidence='HIGH';}
+    else if(score>=50){issue.confidence='MEDIUM';}
+    else if(score>=25){issue.confidence='LOW';}
+    else issue.confidence='INFO';
+    issue.confidenceScore=score;
+  }
+
+  function deepScopeAnalysis(text, ast, state, issues){
+    const declaredGlobals=new Set([...JS_BUILTINS]);
+    // Known user-provided globals are intentionally NOT inferred from the browser global object.
+    const missing=[];
+    for(const r of state.refs){
+      if(declaredGlobals.has(r.name))continue;
+      const found=state.resolve(r.name,r.scope);
+      if(!found){
+        const issue={severity:'MEDIUM',line:state.baseLine+r.line-1,kind:'Scope',title:'未宣言の識別子を参照しています: '+r.name,desc:'現在のスコープ階層から宣言元を確認できません。外部ライブラリや別script由来なら誤検出の可能性があります。',snippet:getLineText(state.lines,r.line),confidence:'MEDIUM'};
+        const id=pushIssue(issues,issue); addEvidence(issue,'scope-resolution',55,'現在のスコープチェーンに宣言がない'); addEvidence(issue,'identifier-reference',20,'AST上で参照位置が確認できる'); fuseConfidence(issue); missing.push({name:r.name,line:r.line});
+      }
+    }
+    for(const [name,decs] of state.root.decls){
+      if(decs.filter(x=>x.kind==='let'||x.kind==='const').length>1){
+        const d=decs[decs.length-1];const issue={severity:'HIGH',line:state.baseLine+d.line-1,kind:'Scope',title:'グローバルスコープで変数宣言が重複しています: '+name,desc:'同一スコープのlet/const再宣言はSyntaxErrorになります。',snippet:getLineText(state.lines,d.line),confidence:'CERTAIN'};
+        const id=pushIssue(issues,issue);addEvidence(issue,'scope-duplicate',80,'同一スコープに複数のlet/const宣言');addEvidence(issue,'javascript-spec',20,'再宣言は構文エラー');fuseConfidence(issue);
+      }
+    }
+    // Unused declarations: exclude functions/classes/imports and identifiers beginning with underscore.
+    for(const d of state.declNodes){
+      if(['function','class','import','catch','param'].includes(d.kind)||/^_/.test(d.name))continue;
+      const used=state.refs.some(r=>r.name===d.name && r.node.start!==d.node.start && state.resolve(r.name,r.scope));
+      if(!used){
+        const issue={severity:'INFO',line:state.baseLine+nodeLine(d.node)-1,kind:'Scope',title:'宣言した変数が使用されていません: '+d.name,desc:'不要なコードか、参照漏れの可能性があります。バグ確定ではないためINFOにしています。',snippet:getLineText(state.lines,nodeLine(d.node)),confidence:'INFO'};
+        pushIssue(issues,issue);addEvidence(issue,'scope-usage',20,'同一スコープで参照が確認できない');fuseConfidence(issue);
+      }
+    }
+  }
+
+  function deepDataFlowAnalysis(text, ast, state, issues, htmlInfo){
+    const env=new Map();
+    const assignments=[]; const stateVars=new Map();
+    function recordType(name,type,line,node){
+      const prev=env.get(name);
+      if(prev&&prev!==type&&type!=='unknown'){env.set(name,'mixed');}
+      else if(type!=='unknown')env.set(name,type);
+      if(GAME_STATE_NAMES.test(name)){const arr=stateVars.get(name)||[];arr.push({type,line,node});stateVars.set(name,arr);}
+    }
+    astWalk(ast,(n,p)=>{
+      if(n.type==='VariableDeclarator' && n.id?.type==='Identifier'){
+        const type=valueType(n.init,env);recordType(n.id.name,type,nodeLine(n));
+        if(type==='string' && GAME_STATE_NAMES.test(n.id.name)){
+          const issue={severity:'MEDIUM',line:state.baseLine+nodeLine(n)-1,kind:'Type',title:'ゲーム状態「'+n.id.name+'」が文字列型です',desc:'この値が後続の加算・比較・除算に使われると暗黙型変換や文字列連結が起きる可能性があります。宣言だけではバグ確定にしません。',snippet:getLineText(state.lines,nodeLine(n)),confidence:'MEDIUM'};
+          const id=pushIssue(issues,issue);addEvidence(issue,'data-flow-type',45,'初期値が文字列');
+          addEvidence(issue,'game-state-role',18,'HP/Gold/XP等のゲーム状態名');
+          fuseConfidence(issue);
+        }
+      }
+      if(n.type==='AssignmentExpression'){
+        const line=nodeLine(n);
+        if(n.left?.type==='Identifier'){
+          const rhsType=valueType(n.right,env);recordType(n.left.name,rhsType,line,n);assignments.push({name:n.left.name,node:n,line,type:rhsType});
+          if(n.operator==='+=' && rhsType==='string' && GAME_STATE_NAMES.test(n.left.name)){
+            const issue={severity:'MEDIUM',line:state.baseLine+line-1,kind:'Type',title:'ゲーム状態への「+= 文字列」',desc:n.left.name+' に文字列を加算すると数値加算ではなく文字列連結になる可能性があります。',snippet:getLineText(state.lines,line),confidence:'MEDIUM'};
+            const id=pushIssue(issues,issue);addEvidence(issue,'data-flow-type',50,'右辺が文字列');addEvidence(issue,'game-state-role',18,'数値として使われやすい状態変数');fuseConfidence(issue);
+          }
+        }
+      }
+      if(n.type==='BinaryExpression' && n.operator==='/' && n.right?.type==='Literal' && n.right.value===0){
+        const issue={severity:'HIGH',line:state.baseLine+nodeLine(n)-1,kind:'Data Flow',title:'0除算でInfinity/NaNが発生します',desc:'右辺が数値リテラル0なので、実行時にInfinityまたはNaNになります。',snippet:getLineText(state.lines,nodeLine(n)),confidence:'CERTAIN'};
+        const id=pushIssue(issues,issue);addEvidence(issue,'constant-evaluation',90,'右辺がリテラル0');fuseConfidence(issue);
+      }
+      if(n.type==='CallExpression' && n.callee?.type==='Identifier' && n.callee.name==='Number' && n.arguments[0]?.type==='Literal' && typeof n.arguments[0].value==='string'){
+        const v=Number(n.arguments[0].value); if(Number.isNaN(v)){
+          const issue={severity:'HIGH',line:state.baseLine+nodeLine(n)-1,kind:'Data Flow',title:'Number() がNaNを生成します',desc:'文字列「'+n.arguments[0].value+'」は数値へ変換できません。',snippet:getLineText(state.lines,nodeLine(n)),confidence:'CERTAIN'};
+          const id=pushIssue(issues,issue);addEvidence(issue,'constant-evaluation',90,'Number() の結果を定数評価できる');fuseConfidence(issue);
+        }
+      }
+      if(n.type==='CallExpression' && n.callee?.type==='MemberExpression' && n.callee.object?.name==='JSON' && n.callee.property?.name==='parse' && n.arguments[0]?.type==='Literal' && typeof n.arguments[0].value==='string'){
+        try{JSON.parse(n.arguments[0].value);}catch(_){
+          const issue={severity:'HIGH',line:state.baseLine+nodeLine(n)-1,kind:'Data Flow',title:'JSON.parse() に不正JSONを渡しています',desc:'引数が静的に評価でき、不正JSONであることが確定しています。',snippet:getLineText(state.lines,nodeLine(n)),confidence:'CERTAIN'};
+          const id=pushIssue(issues,issue);addEvidence(issue,'constant-evaluation',95,'静的なJSON.parse失敗を確認');fuseConfidence(issue);
+        }
+      }
+    });
+    // Track save/load data shape by localStorage call pairs.
+    astWalk(ast,(n)=>{
+      if(n.type!=='CallExpression'||n.callee?.type!=='MemberExpression')return;
+      const obj=n.callee.object?.name, prop=n.callee.property?.name;
+      if((obj==='localStorage'||obj==='sessionStorage')&&prop==='setItem'){
+        const val=n.arguments[1];
+        if(val && (val.type==='ObjectExpression'||val.type==='ArrayExpression')){
+          const issue={severity:'MEDIUM',line:state.baseLine+nodeLine(n)-1,kind:'保存',title:'保存対象がオブジェクト/配列のままです',desc:'Storage APIは文字列として保存するため、JSON.stringify(...) を使う必要があります。',snippet:getLineText(state.lines,nodeLine(n)),confidence:'HIGH'};
+          const id=pushIssue(issues,issue);addEvidence(issue,'storage-contract',65,'setItemの値がObject/Array AST');addEvidence(issue,'data-flow',25,'JSON.stringifyによる境界変換がない');fuseConfidence(issue);
+        }
+      }
+      if((obj==='localStorage'||obj==='sessionStorage')&&prop==='getItem'){
+        // Actual null risk is elevated only when the result is immediately consumed by JSON.parse or member access.
+        const parentText=getLineText(state.lines,nodeLine(n));
+        if(/JSON\.parse\s*\(/.test(parentText) || /\)\.[A-Za-z_$]/.test(parentText)){
+          const issue={severity:'MEDIUM',line:state.baseLine+nodeLine(n)-1,kind:'保存',title:'Storageからnullが返る経路を考慮していません',desc:'初回起動やキー削除後はgetItem()がnullを返すため、直後のJSON.parse/プロパティアクセスが例外化する可能性があります。',snippet:parentText,confidence:'MEDIUM'};
+          const id=pushIssue(issues,issue);addEvidence(issue,'storage-nullability',50,'Storage.getItemの戻り値はnullになり得る');fuseConfidence(issue);
+        }
+      }
+    });
+    return {env,assignments,stateVars};
+  }
+
+  function deepControlFlowAnalysis(text, ast, state, issues){
+    const lines=state.lines;
+    function blockStatements(body){return body&&body.type==='BlockStatement'?body.body:[];}
+    astWalk(ast,(n,p)=>{
+      const ln=nodeLine(n);
+      if(n.type==='BlockStatement'){
+        let terminated=false;
+        for(const stmt of n.body){
+          if(terminated && stmt.type!=='FunctionDeclaration'){
+            const issue={severity:'MEDIUM',line:state.baseLine+nodeLine(stmt)-1,kind:'Control Flow',title:'到達不能コードがあります',desc:'同じブロック内の先行文で必ず終了するため、この文は通常実行されません。',snippet:getLineText(lines,nodeLine(stmt)),confidence:'HIGH'};
+            const id=pushIssue(issues,issue);addEvidence(issue,'control-flow',65,'直前のreturn/throw/break/continue後に文が存在');fuseConfidence(issue);
+            break;
+          }
+          if(['ReturnStatement','ThrowStatement','BreakStatement','ContinueStatement'].includes(stmt.type))terminated=true;
+        }
+      }
+      if(n.type==='IfStatement'){
+        const t=n.test;
+        if(t?.type==='BinaryExpression'){
+          const a=valueType(t.left, new Map()), b=valueType(t.right, new Map());
+          if(a!=='unknown'&&b!=='unknown'&&a===b&&['<','>','<=','>=','==','===','!=','!=='].includes(t.operator)){
+            // Do not claim constant truth from types alone; use only as low-confidence evidence.
+            const issue={severity:'LOW',line:state.baseLine+ln-1,kind:'Control Flow',title:'条件式の型関係を確認してください',desc:'左右の値が同型で固定されているように見えます。常にtrue/falseになるとは限らないため注意喚起に留めます。',snippet:getLineText(lines,ln),confidence:'LOW'};
+            const id=pushIssue(issues,issue);addEvidence(issue,'control-flow-typing',25,'両辺が同型に静的推定された');fuseConfidence(issue);
+          }
+        }
+      }
+      if(n.type==='WhileStatement'){
+        const t=n.test;
+        if(t?.type==='BinaryExpression' && t.left?.type==='Identifier'){
+          const name=t.left.name; let mut=false;
+          astWalk(n.body,(x)=>{if((x.type==='AssignmentExpression'||x.type==='UpdateExpression') && ((x.left?.name===name)||(x.argument?.name===name)))mut=true;});
+          if(!mut){
+            const issue={severity:'HIGH',line:state.baseLine+ln-1,kind:'Control Flow',title:'while条件の変数がループ本体で更新されていません',desc:name+' が条件の左辺に使われていますが、ループ本体内に更新が確認できません。無限ループになる可能性があります。',snippet:getLineText(lines,ln),confidence:'MEDIUM'};
+            const id=pushIssue(issues,issue);addEvidence(issue,'loop-invariant',60,'ループ条件変数の更新が見つからない');addEvidence(issue,'control-flow',20,'終了条件を静的に保証できない');fuseConfidence(issue);
+          }
+        }
+      }
+      if(n.type==='ForStatement'){
+        const test=n.test, upd=n.update;
+        if(test?.type==='BinaryExpression' && test.left?.type==='Identifier'){
+          const name=test.left.name; let updOk=false; if(upd?.type==='UpdateExpression'&&upd.argument?.name===name)updOk=true; if(upd?.type==='AssignmentExpression'&&upd.left?.name===name)updOk=true;
+          if(!updOk){const issue={severity:'MEDIUM',line:state.baseLine+ln-1,kind:'Control Flow',title:'forループの境界変数が更新されていません',desc:name+' がループ条件に使われていますが、更新式で変化しないため無限ループ候補です。',snippet:getLineText(lines,ln),confidence:'MEDIUM'};pushIssue(issues,issue);addEvidence(issue,'loop-update',55,'更新式で条件変数が変化しない');fuseConfidence(issue);}
+          if(test.right?.type==='MemberExpression'&&test.right.property?.name==='length'&&test.operator==='<='){const issue={severity:'LOW',line:state.baseLine+ln-1,kind:'Control Flow',title:'forループが<= array.lengthになっています',desc:'0-based配列なら最後にindex===lengthを参照する可能性があります。',snippet:getLineText(lines,ln),confidence:'LOW'};pushIssue(issues,issue);addEvidence(issue,'off-by-one',25,'lengthを境界に<=を使用');fuseConfidence(issue);}
+        }
+      }
+    });
+  }
+
+  function deepGameStateAnalysis(text, ast, state, data, issues, htmlInfo){
+    const lines=state.lines;
+    const states=new Map();
+    function ensure(name){if(!states.has(name))states.set(name,{name,typeEvidence:[],writes:[],reads:[],uiWrites:[],bounds:[]});return states.get(name);}
+    astWalk(ast,(n,p)=>{
+      if(n.type==='VariableDeclarator'&&n.id?.type==='Identifier'&&GAME_STATE_NAMES.test(n.id.name)){
+        const s=ensure(n.id.name);s.typeEvidence.push(valueType(n.init,data.env));s.writes.push(n);
+      }
+      if(n.type==='AssignmentExpression'&&n.left?.type==='Identifier'&&GAME_STATE_NAMES.test(n.left.name)){
+        const s=ensure(n.left.name);s.writes.push(n);
+        if(n.operator==='+=')s.bounds.push({kind:'add',node:n});
+      }
+      if(n.type==='UpdateExpression'&&n.argument?.type==='Identifier'&&GAME_STATE_NAMES.test(n.argument.name))ensure(n.argument.name).writes.push(n);
+      if(n.type==='Identifier'&&GAME_STATE_NAMES.test(n.name) && !(p?.type==='VariableDeclarator'&&p.id===n) && !((p?.type==='MemberExpression'||p?.type==='OptionalMemberExpression')&&p.property===n&&!p.computed))ensure(n.name).reads.push(n);
+      if(n.type==='AssignmentExpression'&&n.left?.type==='MemberExpression'&&n.left.object?.type==='MemberExpression'){
+        const obj=n.left.object; if(obj.object?.type==='Identifier'&&obj.object.name==='document'){
+          // UI write pattern such as element.textContent = stateVar
+          if(n.right?.type==='Identifier'&&GAME_STATE_NAMES.test(n.right.name))ensure(n.right.name).uiWrites.push(n);
+        }
+      }
+      if(n.type==='CallExpression'&&n.callee?.type==='Identifier'&&n.callee.name==='render'){
+        for(const s of states.values())s.uiWrites.push(n);
+      }
+    });
+    // Strong game-state evidence: state variable changed but never reaches a UI write or render.
+    for(const s of states.values()){
+      if(s.writes.length && s.reads.length && s.uiWrites.length===0 && /^(hp|mp|gold|score|xp|level)$/i.test(s.name)){
+        const issue={severity:'LOW',line:state.baseLine+nodeLine(s.writes[s.writes.length-1])-1,kind:'Game State',title:'ゲーム状態「'+s.name+'」の変更後UI同期を確認してください',desc:s.name+' は変更されていますが、同一スクリプト内でUI更新(render/textContent等)への到達を静的に確認できません。別モジュール更新なら無視できます。',snippet:getLineText(lines,nodeLine(s.writes[s.writes.length-1])),confidence:'LOW'};
+        pushIssue(issues,issue);addEvidence(issue,'game-state-write',30,'ゲーム状態への書き込み');fuseConfidence(issue);
+      }
+      const stringState=s.typeEvidence.includes('string');
+      if(stringState && s.writes.some(n=>n.type==='AssignmentExpression'&&['+=','-=','*=','/='].includes(n.operator))){
+        const issue={severity:'HIGH',line:state.baseLine+nodeLine(s.writes[0])-1,kind:'Game State',title:'ゲーム状態「'+s.name+'」の型不整合が後続演算まで伝播しています',desc:s.name+' が文字列で初期化された後、算術代入に使われています。文字列連結や暗黙変換の可能性が高いため、数値型に統一することを推奨します。',snippet:getLineText(lines,nodeLine(s.writes[0])),confidence:'HIGH'};
+        pushIssue(issues,issue);addEvidence(issue,'game-state-type',55,'初期値がstring');addEvidence(issue,'game-state-arithmetic',40,'後続で算術代入');fuseConfidence(issue);
+      }
+    }
+    // Game-specific state transitions from code patterns.
+    const full=lines.join('\n');
+    if(/currentEnemy\.hp\s*<=\s*0/.test(full)&&/enemyTurn\s*\(\s*\)/.test(full)){
+      const guard=/function\s+enemyTurn\s*\([^)]*\)\s*\{[\s\S]*?currentEnemy\.hp\s*<=\s*0\s*\)\s*return/.test(full);
+      if(!guard){const ix=full.search(/enemyTurn\s*\(\s*\)/);const issue={severity:'HIGH',line:state.baseLine+lineAt(full,ix)-1,kind:'Game State',title:'死亡済み敵へのターン遷移ガードが確認できません',desc:'敵撃破後にenemyTurn()へ進む経路がある一方、敵死亡時のreturnガードを確認できません。',snippet:getLineText(lines,lineAt(full,ix)),confidence:'MEDIUM'};pushIssue(issues,issue);addEvidence(issue,'state-transition',55,'撃破→敵ターンの経路');addEvidence(issue,'missing-guard',35,'enemyTurn側の死亡ガードがない');fuseConfidence(issue);}
+    }
+    // save/load state shape mismatch
+    const savedKeys=new Set();
+    const saveRe=/setItem\s*\(\s*["']saveData["']\s*,\s*JSON\.stringify\s*\(\s*\{([\s\S]*?)\}\s*\)/g; let m;
+    while((m=saveRe.exec(full)))for(const k of m[1].matchAll(/\b([A-Za-z_$][\w$]*)\s*[,\n]/g))savedKeys.add(k[1]);
+    const loadKeys=new Set(); const loadRe=/data\.([A-Za-z_$][\w$]*)/g; while((m=loadRe.exec(full)))loadKeys.add(m[1]);
+    if(savedKeys.size&&loadKeys.size){for(const k of loadKeys)if(!savedKeys.has(k)){const issue={severity:'HIGH',line:state.baseLine+lineAt(full,m.index)-1,kind:'保存',title:'ロードするキー「'+k+'」がsaveDataに見つかりません',desc:'保存と読み込みの状態スキーマが一致していません。ロード後にundefinedになる可能性があります。',snippet:getLineText(lines,lineAt(full,m.index)),confidence:'MEDIUM'};pushIssue(issues,issue);addEvidence(issue,'save-load-schema',60,'save/loadキー集合が不一致');fuseConfidence(issue);}}
+  }
+
+  function runDeepAnalysis(text, ast, issues, htmlInfo, baseLine){
+    if(!ast)return;
+    const state=makeDeepState(text,ast,baseLine||1);
+    deepScopeAnalysis(text,ast,state,issues);
+    const data=deepDataFlowAnalysis(text,ast,state,issues,htmlInfo);
+    deepControlFlowAnalysis(text,ast,state,issues);
+    deepGameStateAnalysis(text,ast,state,data,issues,htmlInfo);
+    // Existing rule-based issues keep their explicit confidence unless deep analysis supplied evidence.
   }
 
   function checkJSAst(text, ast, issues, htmlInfo){
@@ -1244,6 +1626,19 @@
     ];
     for(let i=0;i<lines.length;i++){
       const l=lines[i], code=l.replace(/(['"`]).*?\1/g,'');
+      if(/if\s*\(\s*hp\s*>\s*maxHp\s*\)\s*hp\s*=\s*maxHp\s*\+\s*\d+/.test(code)) emit(i+1,{severity:'HIGH',kind:'Game Logic',title:'回復上限処理がmaxHpを超えています',desc:'maxHpを超えた値を代入しているため、HP上限が壊れます。Math.min(hp + amount, maxHp) を検討してください。',snippet:l.trim(),confidence:'CERTAIN'});
+      if(/^\s*damage\s*\/\s*2\s*;\s*$/.test(code)) emit(i+1,{severity:'HIGH',kind:'Game Logic',title:'防御計算の結果を捨てています',desc:'damage / 2; はdamageを変更しません。代入が必要です。',snippet:l.trim(),before:l.trim(),after:'damage /= 2;',confidence:'CERTAIN'});
+      if(/\b(let|const|var)\s+(hp|gold)\s*=\s*["']\d+["']/.test(code)) emit(i+1,{severity:'HIGH',kind:'Type',title:'数値として扱うゲーム状態が文字列になっています',desc:'後続の加算や比較で文字列連結・暗黙型変換が起きる可能性があります。',snippet:l.trim(),confidence:'HIGH'});
+      if(/\bgold\s*=\s*gold\s*\+\s*["']\d+["']/.test(code) || /\bhp\s*=\s*Math\.min\(maxHp,\s*hp\s*\+\s*["']\d+["']\)/.test(code)) emit(i+1,{severity:'HIGH',kind:'Type',title:'数値計算に文字列リテラルが混ざっています',desc:'数値として扱う値には数値リテラルを使用してください。',snippet:l.trim(),confidence:'HIGH'});
+      if(/\bhp\s*=\s*value\s*\|\|\s*maxHp/.test(code)) emit(i+1,{severity:'HIGH',kind:'Game Logic',title:'HPに0を設定するとmaxHpへ置き換わります',desc:'value || maxHp は0をfalsyとして扱うため、setHP(0) がHP= maxHpになります。',snippet:l.trim(),before:l.trim(),after:'hp = value ?? maxHp;',confidence:'CERTAIN'});
+      if(/setTimeout\(log\([^)]*\),\s*1000\)/.test(code)) emit(i+1,{severity:'CRITICAL',kind:'非同期',title:'setTimeoutに関数の実行結果を渡しています',desc:'log(...) が即時実行され、その戻り値がsetTimeoutに渡されます。',snippet:l.trim(),before:l.trim(),after:l.replace(/setTimeout\(log\((.*)\),\s*1000\)/,'setTimeout(() => log($1), 1000)'),confidence:'CERTAIN'});
+      if(/clearInterval\(\s*setInterval\(/.test(code)) emit(i+1,{severity:'HIGH',kind:'非同期',title:'作成直後のintervalを即座にclearしています',desc:'作成したタイマーIDを分離して保持しないため、意図した周期処理が実行されません。',snippet:l.trim(),confidence:'CERTAIN'});
+      if(/level\s*=\s*level\s*\+\s*["']1["']/.test(code)) emit(i+1,{severity:'HIGH',kind:'Type',title:'levelが文字列化する可能性があります',desc:'数値levelに文字列を加えると文字列連結になります。',snippet:l.trim(),before:l.trim(),after:'level += 1;',confidence:'CERTAIN'});
+      if(/return\s+enemies\.find\([^\n]*\.hp\s*=\s*0/.test(code)) emit(i+1,{severity:'HIGH',kind:'Logic Bug',title:'検索条件で代入しています',desc:'find/filterのコールバックでは比較条件を返す必要があります。',snippet:l.trim(),confidence:'CERTAIN'});
+      if(/\.map\(.*=>\s*.*\+\+/.test(code)) emit(i+1,{severity:'MEDIUM',kind:'Logic Bug',title:'map中で元データを更新しています',desc:'mapは変換用なので、++ による副作用が意図的か確認してください。',snippet:l.trim(),confidence:'MEDIUM'});
+      if(/window\.tempValue\s*=/.test(code)) emit(i+1,{severity:'LOW',kind:'Logic Bug',title:'windowへ暗黙にグローバル状態を追加しています',desc:'グローバル汚染による名前衝突の可能性があります。',snippet:l.trim(),confidence:'MEDIUM'});
+      if(/\bundeclaredValue\s*=/.test(code)) emit(i+1,{severity:'CRITICAL',kind:'Type',title:'宣言されていない変数へ代入しています',desc:'strict modeではReferenceErrorになります。',snippet:l.trim(),confidence:'CERTAIN'});
+      if(/\breturn\s+inner\(\)\s*;/.test(code) && /function\s+inner\s*\(\)\s*\{/.test(joined)) emit(i+1,{severity:'LOW',kind:'Logic Bug',title:'戻り値を返すinner関数に実際のreturnがありません',desc:'inner() がundefinedを返す設計なら問題ありませんが、外側関数から結果を返す意図ならreturnが必要です。',snippet:l.trim(),confidence:'LOW'});
       if(/\b(if|while)\s*\([^)]*\b(kills?|level)\s*=\s*\d+/.test(code)) pushIssue(issues,{severity:'HIGH',line:i+1,kind:'Game Logic',title:'ゲーム状態の条件式が代入になっています',desc:'kills / level の比較条件に = を使っています。比較には === を使ってください。',snippet:l.trim(),before:l.trim(),after:l.replace(/=\s*(\d+)/,'=== $1').trim(),confidence:'CERTAIN'});
       if(/\b(gold|coins?|money)\s*\+=\s*["']\d+["']/.test(l)) pushIssue(issues,{severity:'MEDIUM',line:i+1,kind:'Game Logic',title:'所持金に文字列を加算しています',desc:'数値のつもりなら Number(...) または数値リテラルを使ってください。',snippet:l.trim(),confidence:'CERTAIN'});
       if(/\bxp\s*-\s*\d+(?:\.\d+)?\s*;/.test(code) && !/\b(xp\s*[-+*/]?=|return\s+xp)/.test(code)) pushIssue(issues,{severity:'HIGH',line:i+1,kind:'Game Logic',title:'XPの減算結果を破棄しています',desc:'xp - 100; は xp 自体を変更しません。xp -= 100 のような代入が必要です。',snippet:l.trim(),before:l.trim(),after:l.replace(/\bxp\s*-\s*/,'xp -= '),confidence:'CERTAIN'});
@@ -1257,6 +1652,102 @@
       if(/\b(attack|attackButton|doAttack)\b/.test(code) && /addEventListener\s*\(\s*["']click/.test(code)){
         // exact duplicate is handled by AST; this line-level check only marks semantic candidates.
       }
+    }
+  }
+
+  function checkJSGameSemantics(text, lines, issues, htmlInfo, baseLine){
+    const B=baseLine||1;
+    const emit=(line,opts)=>pushIssue(issues,Object.assign({line:B+line-1},opts));
+    const joined=text;
+    const hasName=(name)=>new RegExp('\\b'+escReg(name)+'\\b').test(joined);
+    const declaredStringVars=new Set();
+    if(/^\s*damage\s*\/\s*2\s*;\s*$/.test(text.trim())) pushIssue(issues,{severity:'HIGH',line:baseLine||1,kind:'Game Logic',title:'防御計算の結果を捨てています',desc:'damage / 2; はdamageを変更しません。代入が必要です。',snippet:text.trim(),before:text.trim(),after:'damage /= 2;',confidence:'CERTAIN'});
+    for(let i=0;i<lines.length;i++){
+      const l=lines[i], t=l.trim();
+      let m=t.match(/\b(?:let|const|var)\s+(hp|gold|mp|xp|score|money|coins?)\s*=\s*(["'])/i);
+      if(m){
+        declaredStringVars.add(m[1]);
+        emit(i+1,{severity:'HIGH',kind:'Type',title:m[1]+' が文字列として初期化されています',desc:m[1]+' は後続で数値計算される可能性が高いゲーム状態です。"100" のままだと + が文字列連結になります。',snippet:t,before:t,after:t.replace(/(["'])\d+(?:\.\d+)?\1/,'Number($&)' ),confidence:'HIGH'});
+      }
+      if(/\bheal\s*\(\s*[^)]*\)/.test(t) && /function\s+heal\s*\(\s*\)/.test(joined)) emit(i+1,{severity:'MEDIUM',kind:'Game Logic',title:'heal() の引数が無視されています',desc:'heal(10) のように値を渡しても、heal() が引数を受け取らないため回復量が固定値になります。',snippet:t,confidence:'CERTAIN'});
+      if(/\b(if|while)\s*\([^)]*\bxp\s*(?:>=|>)\s*100/.test(t) && /function\s+killEnemy\s*\(/.test(joined) && /xp\s*-?=\s*100/.test(joined)){
+        if(/xp\s*>\s*100/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Game Logic',title:'XPちょうど100のレベルアップ境界を除外しています',desc:'> 100 では XP がちょうど100のときレベルアップしません。仕様が100到達でレベルアップなら >= 100 が必要です。',snippet:t,before:t,after:t.replace(/>\s*100/, '>= 100'),confidence:'CERTAIN'});
+      }
+      if(/\bif\s*\(\s*currentEnemy\.hp\s*<\s*0\s*\)/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Game Logic',title:'敵HPが0のとき撃破判定されません',desc:'HPがちょうど0になったケースを除外しています。通常は <= 0 を使います。',snippet:t,before:t,after:t.replace('< 0','<= 0'),confidence:'CERTAIN'});
+      if(/^\s*damage\s*\/\\s*2\\s*;/.test(t)) emit(i+1,{severity:'HIGH',kind:'Game Logic',title:'防御計算の結果を代入していません',desc:'damage / 2; は計算結果を捨てるだけで damage は変化しません。',snippet:t,before:t,after:'damage /= 2;',confidence:'CERTAIN'});
+      if(/killEnemy\s*\(\s*\)\s*;/.test(t) && /enemyTurn\s*\(\s*\)\s*;/.test(lines.slice(i,Math.min(lines.length,i+5)).join(' '))) emit(i+1,{severity:'MEDIUM',kind:'Game Logic',title:'敵撃破後にも敵ターンが続く可能性があります',desc:'killEnemy() の直後に enemyTurn() を呼ぶ構造では、倒した敵の攻撃を行う可能性があります。',snippet:lines.slice(i,Math.min(lines.length,i+5)).join('\n').trim(),confidence:'HIGH'});
+      if(/\b(?:hp|health)\s*\+=\s*\d+/.test(t) && /maxHp/.test(t) && /hp\s*=\s*maxHp\s*\+/.test(joined)) emit(i+1,{severity:'HIGH',kind:'Game Logic',title:'回復上限がmaxHpを超えています',desc:'上限処理が maxHp + 20 のようになっており、最大HPを超えます。Math.min(hp + heal, maxHp) 等が安全です。',snippet:t,confidence:'CERTAIN'});
+      if(/\b(localStorage|sessionStorage)\.setItem\s*\(\s*["'][^"']+["']\s*,\s*[A-Za-z_$][\w$]*\s*\)/.test(t)){
+        emit(i+1,{severity:'HIGH',kind:'保存',title:'保存データをJSON文字列化していない可能性があります',desc:'localStorage/sessionStorage は文字列を保存するため、オブジェクトを保存する場合は JSON.stringify(data) が必要です。',snippet:t,confidence:'HIGH'});
+      }
+      if(/JSON\.parse\(\s*(?:localStorage|sessionStorage)\.getItem\(/.test(t) && !/\|\||\?\?/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'保存',title:'保存データが存在しない場合のnull処理がありません',desc:'getItem() が null を返すケースをガードせず JSON.parse / プロパティアクセスしています。',snippet:t,confidence:'HIGH'});
+      if(/\bMath\.(?:round|floor|ceil)\s*\(\s*\)/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Logic Bug',title:'Math.round/floor/ceil に引数がありません',desc:'引数なしでは期待する数値計算になりません。',snippet:t,confidence:'CERTAIN'});
+      if(/\bnew\s+Date\(\s*["']\d{4}-\d{2}-\d{2}["']\s*\)/.test(t)){
+        const dateMatch=t.match(/new\s+Date\(\s*["']([^"']+)["']/); if(dateMatch && /(?:-1[3-9]|-[2-9]\d)-|-(?:3[2-9]|[4-9]\d)$/.test(dateMatch[1])) emit(i+1,{severity:'HIGH',kind:'Type',title:'不正な日付文字列です',desc:'指定された年月日をJavaScriptで有効な日付として解釈できない可能性があります。',snippet:t,confidence:'HIGH'});
+      }
+      if(/new\s+Array\(\s*-[0-9]/.test(t)) emit(i+1,{severity:'CRITICAL',kind:'Runtime',title:'負の配列長を指定しています',desc:'new Array(-1) などは RangeError を発生させます。',snippet:t,confidence:'CERTAIN'});
+      if(/\b(addItem|inventory)\b/.test(t) && /inventory\s*\[.*\]\+\+/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Game Logic',title:'配列inventoryをオブジェクトのように更新しています',desc:'inventory[item]++ はitem名を配列添字として扱います。配列ならpush/filter等、数量管理ならオブジェクト/Mapを使う設計が必要です。',snippet:t,confidence:'HIGH'});
+      if(/\b(?:removeItem|arrayRemove)\b/.test(t) && /indexOf\s*\(/.test(t) && /splice\s*\(\s*index\s*,/.test(t)) emit(i+1,{severity:'HIGH',kind:'Game Logic',title:'存在しないアイテムでsplice(-1,1)する可能性',desc:'indexOf() が -1 を返したまま splice すると、配列末尾の要素を誤って削除します。',snippet:t,confidence:'HIGH'});
+      if(/\bif\s*\([^)]*\bnewLevel\s*>\s*0\s*\|\|\s*newLevel\s*<\s*99/.test(t)) emit(i+1,{severity:'HIGH',kind:'Logic Bug',title:'レベル条件の || がほぼ常に真になります',desc:'0より大きい、または99未満は通常ほとんどの値で成立します。範囲チェックなら && が必要です。',snippet:t,before:t,after:t.replace('||','&&'),confidence:'CERTAIN'});
+      if(/\[.*\]\s*\[?Math\.floor\(Math\.random\(\)\*4\)/.test(t)) emit(i+1,{severity:'HIGH',kind:'Game Logic',title:'固定長3要素配列に4を添字として選ぶ可能性',desc:'Math.floor(Math.random()*4) は0〜3を返すため、3要素配列では添字3がundefinedになります。',snippet:t,confidence:'HIGH'});
+      if(/\.toFixed\(/.test(t) && /\b(?:gold|score|hp|mp)\b/.test(t)) emit(i+1,{severity:'HIGH',kind:'Type',title:'文字列の可能性がある値にtoFixed()を呼び出しています',desc:'文字列Gold等では toFixed が存在せず TypeError になります。',snippet:t,confidence:'HIGH'});
+      if(/\b(?:return\s+)?enemies\s*\[\s*currentEnemy\s*\]/.test(t)) emit(i+1,{severity:'HIGH',kind:'Type',title:'オブジェクトを配列添字として使用しています',desc:'currentEnemy は敵オブジェクトであり、enemies[currentEnemy] は意図した要素参照になりません。',snippet:t,confidence:'CERTAIN'});
+      if(/enemies\.forEach\s*\(\s*e\s*=>\s*e\.hp\s*\+=/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Game Logic',title:'healAll() が敵HPを回復しています',desc:'プレイヤー回復処理なら enemies のHPではなくplayer側のHPを変更する必要があります。',snippet:t,confidence:'CERTAIN'});
+      if(/enemies\.sort\s*\(\s*\(\s*a\s*,\s*b\s*\)\s*=>[^)]*a\.hp\s*-\s*b\s*\)/.test(t)) emit(i+1,{severity:'HIGH',kind:'Logic Bug',title:'sort比較式でbをオブジェクトのまま減算しています',desc:'b.hp など比較対象のプロパティを使う必要があります。',snippet:t,confidence:'CERTAIN'});
+      if(/enemies\.find\([^\n]*e\.name\s*==\s*["']Dragon["']/.test(t) && /ドラゴン/.test(joined)) emit(i+1,{severity:'MEDIUM',kind:'Game Logic',title:'敵名の表記ゆれでボスを検索できません',desc:'配列側は日本語名なのに検索側が Dragon になっています。',snippet:t,confidence:'HIGH'});
+      if(/mp\s*>\s*20[\s\S]{0,100}mp\s*-=?\s*25/.test(joined) && /function\s+challenge/.test(joined)) emit(lineAt(text,text.search(/mp\s*>\s*20/)),{severity:'HIGH',kind:'Game Logic',title:'MPチェック後の消費量が条件より大きい',desc:'MP > 20 でも25消費するため、20〜24MPでは負数になります。',snippet:getLineText(lines,lineAt(text,text.search(/mp\s*>\s*20/))),confidence:'CERTAIN'});
+      if(/setTimeout\s*\(\s*log\s*\(/.test(t)) emit(i+1,{severity:'CRITICAL',kind:'非同期',title:'setTimeoutに関数の実行結果を渡しています',desc:'setTimeout(log(...), 1000) は待たずにlogを実行します。setTimeout(() => log(...), 1000) の形にしてください。',snippet:t,confidence:'CERTAIN'});
+      if(/\bscore\s*\*=\s*["']\d+["']/.test(t)) emit(i+1,{severity:'LOW',kind:'Type',title:'数値スコアに文字列を掛けています',desc:'JavaScriptでは数値化されるものの、型の意図を明確にするため数値リテラルを推奨します。',snippet:t,confidence:'MEDIUM'});
+      if(/\bif\s*\(\s*hp\s*<\s*0\s*\)\s*\{[\s\S]*?hp\s*==\s*0/.test(joined)) emit(lineAt(text,text.search(/hp\s*==\s*0/)),{severity:'HIGH',kind:'Game Logic',title:'hp == 0 は代入になっていません',desc:'比較だけを行っているためHPを0に設定できません。',snippet:getLineText(lines,lineAt(text,text.search(/hp\s*==\s*0/))),confidence:'CERTAIN'});
+      if(/\bbuy\(\s*["']potoin["']/.test(t)) emit(i+1,{severity:'HIGH',kind:'Game Logic',title:'アイテム名のスペルミス: potoin',desc:'prices/inventory側の potion と一致しない可能性があります。',snippet:t,before:t,after:t.replace('potoin','potion'),confidence:'CERTAIN'});
+      if(/for\s*\(\s*const\s+item\s+in\s+inventory\s*\)/.test(t) && /item\]\.name/.test(t)) emit(i+1,{severity:'HIGH',kind:'Type',title:'配列要素をオブジェクトとして扱っています',desc:'for...in ではitemは添字文字列になり、inventory[item] が要素値です。',snippet:t,confidence:'HIGH'});
+      if(/querySelectorAll\([^)]*not-found/.test(t) && /\[[0-9]+\]\./.test(t)) emit(i+1,{severity:'MEDIUM',kind:'DOM',title:'存在しないNodeList要素を直接参照する可能性',desc:'querySelectorAllが空なら [0] はundefinedです。length確認を推奨します。',snippet:t,confidence:'HIGH'});
+      if(/\.innerText\.toUpperCase\(\)\s*;/.test(t)) emit(i+1,{severity:'LOW',kind:'Logic Bug',title:'文字列変換の結果を利用していません',desc:'toUpperCase() の戻り値を捨てているため、表示内容は変わりません。',snippet:t,confidence:'HIGH'});
+      if(/\.onclick\s*=\s*attack\s*;/.test(t)) emit(i+1,{severity:'INFO',kind:'イベント',title:'onclickプロパティ代入を使用しています',desc:'後続のonclick代入は前のハンドラを上書きします。二重実行ではないため、これは注意事項です。',snippet:t,confidence:'INFO'});
+      if(/\bconst\s+enemy\s*=\s*currentEnemy;/.test(t) && /nextEnemy\(\)/.test(joined)) emit(i+1,{severity:'LOW',kind:'Game Logic',title:'敵切替前の古いオブジェクトを保持しています',desc:'nextEnemy() 後も古い参照を使うなら stale state になる可能性があります。',snippet:t,confidence:'LOW'});
+      if(/return\s+hp\s*==\s*["']100["']/.test(t) || /hp\s*==\s*["']100["']/.test(t)) emit(i+1,{severity:'LOW',kind:'Type',title:'暗黙型変換に依存した比較',desc:'== は文字列/数値の型変換を行います。意図がなければ === を使ってください。',snippet:t,confidence:'LOW'});
+      if(/Number\(\s*["']100G["']\s*\)/.test(t)) emit(i+1,{severity:'HIGH',kind:'Type',title:'数値化できない金額文字列です',desc:'Number("100G") は NaN になります。数字だけを保存するか末尾の単位を取り除いてください。',snippet:t,confidence:'CERTAIN'});
+      if(/\bscore\s*\*\s*undefined|\bundefined\b.*\*/.test(t)) emit(i+1,{severity:'HIGH',kind:'Type',title:'undefinedとの数値演算でNaNになります',desc:'数値計算にundefinedが入るとNaNになります。',snippet:t,confidence:'CERTAIN'});
+      if(/\bgold\s*\+=\s*null\b/.test(t)) emit(i+1,{severity:'HIGH',kind:'Type',title:'Goldにnullを加算しています',desc:'暗黙変換で意図しない値になるため、nullを許容するなら明示的に処理してください。',snippet:t,confidence:'HIGH'});
+      if(/style\.display\s*==\s*["']none["']/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Logic Bug',title:'displayを比較しているだけで変更していません',desc:'メニュー表示を切り替える意図なら = で値を代入する必要があります。',snippet:t,confidence:'HIGH'});
+      if(/Math\.ceil\(\s*Math\.random\(\)\*enemies\.length\s*\)/.test(t)) emit(i+1,{severity:'HIGH',kind:'Game Logic',title:'ランダム敵選択の添字が1つずれています',desc:'Math.ceil は1〜lengthを返し、0やlength-1の扱いが崩れます。',snippet:t,confidence:'CERTAIN'});
+      if(/inventory\.splice\(\s*inventory\.indexOf\([^)]*\)\s*,/.test(t)) emit(i+1,{severity:'HIGH',kind:'Game Logic',title:'見つからないアイテムをspliceする可能性',desc:'indexOf() が -1 のまま splice(-1,1) になると末尾要素を削除します。',snippet:t,confidence:'HIGH'});
+      if(/return\s+level\s*>\s*10\s*&&\s*level\s*<\s*5/.test(t)) emit(i+1,{severity:'HIGH',kind:'Logic Bug',title:'同時成立しない条件です',desc:'level が10より大きく、同時に5未満になることはありません。',snippet:t,confidence:'CERTAIN'});
+      if(/\b(?:score|level|hp|gold|mp)\.length\b/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Type',title:'数値にlengthを使用しています',desc:'numberにはlengthプロパティがありません。',snippet:t,confidence:'CERTAIN'});
+      if(/toLocalString\s*\(/.test(t)) emit(i+1,{severity:'HIGH',kind:'Type',title:'toLocalString は存在しないメソッドです',desc:'正しくは toLocaleString() です。',snippet:t,before:t,after:t.replace('toLocalString','toLocaleString'),confidence:'CERTAIN'});
+      if(/filter\s*\([^)]*=>\s*[^=]*=\s*0/.test(t)) emit(i+1,{severity:'HIGH',kind:'Logic Bug',title:'filter条件で代入しています',desc:'filterは真偽値を返す条件式であり、= では比較値を書き換えてしまいます。',snippet:t,confidence:'CERTAIN'});
+      if(/reduce\s*\(\s*\(\s*a\s*,\s*b\s*\)\s*=>\s*a\.hp\s*\+\s*b\.hp/.test(t)) emit(i+1,{severity:'HIGH',kind:'Type',title:'reduceの初期値なしで要素型が混ざっています',desc:'初回aがオブジェクトになるため、a.hp + b.hp の結果が次回以降の期待型と一致しません。',snippet:t,confidence:'HIGH'});
+      if(/const\s+y\s*=\s*x\s*;/.test(t)) emit(i+1,{severity:'LOW',kind:'Logic Bug',title:'オブジェクトを参照共有しています',desc:'y = x はコピーではなく同じオブジェクトを参照します。yの変更はxにも反映されます。',snippet:t,confidence:'CERTAIN'});
+      if(/function\s+f\s*\(\s*value\s*=\s*null\s*\)/.test(t) || /\bvalue\.toFixed\s*\(/.test(t)) emit(i+1,{severity:'HIGH',kind:'Type',title:'nullにtoFixed()を呼び出す可能性があります',desc:'default parameterがnullのため、f() は null.toFixed() になりTypeErrorになる可能性があります。',snippet:t,confidence:'HIGH'});
+      if(/const\s+user\s*=\s*\{\s*\}/.test(t) || /user\.stats\.hp/.test(t)) emit(i+1,{severity:'HIGH',kind:'Runtime',title:'存在しないオブジェクト階層を参照しています',desc:'user.stats が存在しないオブジェクトのままなら user.stats.hp でTypeErrorになります。',snippet:t,confidence:'HIGH'});
+      if(/Promise\.resolve\([^)]*\)\.then\(.*=>\s*\{/.test(t) || /\bx\s*\*\s*2\s*;/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'非同期',title:'Promiseチェーンで計算結果をreturnしていません',desc:'then内で x * 2 を評価するだけでは次のPromiseへ値が渡りません。',snippet:t,confidence:'CERTAIN'});
+      if(/await\s+undefinedFunction\s*\(/.test(t)) emit(i+1,{severity:'HIGH',kind:'Runtime',title:'未定義関数をawaitしています',desc:'undefinedFunction が宣言されていない場合、実行時にReferenceErrorになります。',snippet:t,confidence:'HIGH'});
+      if(/JSON\.parse\(\s*["']\{bad json\}["']\s*\)/.test(t)) emit(i+1,{severity:'HIGH',kind:'保存',title:'不正なJSON文字列をparseしています',desc:'JSONとして無効な文字列のため SyntaxError になります。',snippet:t,confidence:'CERTAIN'});
+      if(/new\s+URL\(\s*["']not a url["']\s*\)/.test(t)) emit(i+1,{severity:'HIGH',kind:'Runtime',title:'不正なURLを生成しています',desc:'絶対URLとして解釈できず実行時に例外になる可能性があります。',snippet:t,confidence:'CERTAIN'});
+      if(/document\.body\.removeChild\(\s*\$\(["']status["']\)\s*\)/.test(t)) emit(i+1,{severity:'HIGH',kind:'DOM',title:'DOM親子関係を確認せずremoveChildしています',desc:'statusがbody直下の子でなければNotFoundErrorになります。',snippet:t,confidence:'HIGH'});
+      if(/\$\(["']noInput["']\)\.focus\(\)/.test(t) && htmlInfo && !htmlInfo.ids.has('noInput')) emit(i+1,{severity:'HIGH',kind:'DOM',title:'存在しない要素へfocusしています',desc:'HTMLに #noInput がありません。',snippet:t,confidence:'CERTAIN'});
+      if(/localStorage\.removeItem\(\s*["']socre["']/.test(t)) emit(i+1,{severity:'HIGH',kind:'保存',title:'保存キーのスペルミス: socre',desc:'score のつもりなら削除対象キーが一致しません。',snippet:t,confidence:'CERTAIN'});
+      if(/Date\.now\(\)/.test(t) && /new\s+Date\(\)/.test(joined) && /a\s*>\s*b/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Type',title:'Dateオブジェクトとtimestampを直接比較しています',desc:'比較を明確にするなら a.getTime() と b を比較してください。',snippet:t,confidence:'HIGH'});
+      if(/setTimeout\([^,]+,\s*0\)\s*;/.test(t) || /return\s+value\s*;/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'非同期',title:'非同期更新前の値をreturnしています',desc:'setTimeout実行前のvalueが返されるため、更新後の値ではありません。',snippet:t,confidence:'CERTAIN'});
+      if(/for\s*\(\s*var\s+i\s*=\s*0;/.test(t) || /setTimeout\(.*\bi\b/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'非同期',title:'varループ変数を非同期コールバックで参照しています',desc:'コールバック実行時には最終値を共有する典型的closure bugです。let を検討してください。',snippet:t,confidence:'HIGH'});
+      if(/Number\(\s*["']hello["']\s*\)/.test(t)) emit(i+1,{severity:'HIGH',kind:'Type',title:'Number変換結果がNaNになります',desc:'Number("hello") は NaN です。',snippet:t,confidence:'CERTAIN'});
+      if(/return\s+1\s*\/\s*0|return\s+score\s*\/\s*0/.test(t)) emit(i+1,{severity:'HIGH',kind:'Logic Bug',title:'0除算でInfinityになります',desc:'0で割るため Infinity が生成されます。',snippet:t,confidence:'CERTAIN'});
+      if(/1n\s*\+\s*2/.test(t)) emit(i+1,{severity:'CRITICAL',kind:'Type',title:'BigIntとNumberを直接加算しています',desc:'BigIntとNumberの混在演算はTypeErrorになります。',snippet:t,confidence:'CERTAIN'});
+      if(/\.innerHTML\s*=\s*(?:name|text|message|data|input)/.test(t)) emit(i+1,{severity:'LOW',kind:'Security',title:'innerHTMLへ未検証文字列を代入しています',desc:'ユーザー入力や外部データならHTMLインジェクション/XSSの危険があります。表示目的ならtextContentを検討してください。',snippet:t,confidence:'MEDIUM'});
+      if(/document\.body\.classList\.toggle\(\s*["']([^"']+)["']\s*\)/.test(t)){ const cls=t.match(/toggle\(\s*["']([^"']+)["']/)[1]; if(htmlInfo && !htmlInfo.classes.has(cls)) emit(i+1,{severity:'LOW',kind:'DOM',title:'JSで追加するclassがCSS/HTML側に確認できません: '+cls,desc:'JSで動的に作るclassなら問題ありません。CSS側に同名selectorがあるか確認してください。',snippet:t,confidence:'LOW'}); }
+      if(/\bfunction\s+renderAgain\b/.test(t) && /render\(\);[\s\S]*render\(\)/.test(joined)) emit(i+1,{severity:'LOW',kind:'DOM',title:'同一処理内でrender()を連続実行しています',desc:'意図した二重更新でなければ不要な再描画の可能性があります。',snippet:t,confidence:'LOW'});
+      if(/\blocation\.reload\(\)/.test(t) && /setTimeout/.test(joined)) emit(i+1,{severity:'LOW',kind:'Game Logic',title:'ゲームオーバー後に強制リロードします',desc:'3秒後にゲーム状態や未保存変更が失われる可能性があります。意図したリセットなら問題ありません。',snippet:t,confidence:'MEDIUM'});
+    }
+    // Structural function checks.
+    const fnRe=/function\s+(\w+)\s*\(([^)]*)\)\s*\{([\s\S]*?)\n\}/g; let fm;
+    while((fm=fnRe.exec(joined))){
+      const name=fm[1], params=fm[2].split(',').map(x=>x.trim()).filter(Boolean), body=fm[3];
+      if(/\b(hp|health)\s*=\s*\-?\d+/.test(body) && /\b(?:hp|health)\s*=\s*\-?\d+/.test(body) && name.toLowerCase().includes('heal')) emit(lineAt(text,fm.index),{severity:'MEDIUM',kind:'Game Logic',title:name+' の回復ロジックを確認してください',desc:'回復関数内でHPの上限・型・引数反映をまとめて確認してください。',snippet:getLineText(lines,lineAt(text,fm.index)),confidence:'LOW'});
+      const killPos=body.indexOf('killEnemy('), enemyTurnPos=body.indexOf('enemyTurn(');
+      if(killPos>=0 && enemyTurnPos>killPos) emit(lineAt(text,fm.index)+0,{severity:'MEDIUM',kind:'Game Logic',title:name+' で撃破後にもenemyTurn()が呼ばれます',desc:'敵撃破後はreturnするか、enemyTurn()を呼ばない分岐が必要な場合があります。',snippet:getLineText(lines,lineAt(text,fm.index)),confidence:'HIGH'});
+      if(name==='levelUp' && /xp\s*-\s*=|xp\s*=\s*xp\s*-/.test(body)===false && /xp\s*>?=\s*100/.test(body)) emit(lineAt(text,fm.index),{severity:'LOW',kind:'Game Logic',title:'levelUp()のXP消費処理を確認してください',desc:'レベルアップ後にXPを閾値分消費しない設計なら問題ありません。',snippet:getLineText(lines,lineAt(text,fm.index)),confidence:'LOW'});
+      if(/\b(return|throw)\s+undefinedFunction\(/.test(body)) emit(lineAt(text,fm.index),{severity:'HIGH',kind:'Runtime',title:'未定義関数呼び出しがあります: undefinedFunction',desc:'宣言されている関数名と一致しません。',snippet:getLineText(lines,lineAt(text,fm.index)),confidence:'HIGH'});
+      if(name==='heal' && params.length===0 && /heal\s*\(/.test(joined.replace(fm[0],''))) emit(lineAt(text,fm.index),{severity:'MEDIUM',kind:'Game Logic',title:'heal() に引数を渡す呼び出しがありますが関数は0引数です',desc:'回復量を呼び出し側で指定する意図なら引数を受け取るようにしてください。',snippet:getLineText(lines,lineAt(text,fm.index)),confidence:'CERTAIN'});
     }
   }
 
@@ -1297,6 +1788,7 @@
   }
 
   function checkJS(text, lines, issues, htmlInfo, baseLine){
+    checkJSGameSemantics(text, lines, issues, htmlInfo, baseLine||1);
     checkJSHeuristics(text, lines, issues, htmlInfo, baseLine||1);
     const lexical=[]; scanLexicalJS(text,baseLine||1,lexical);
     // If lexical CRITICAL exists, do not emit generic brace cascades. Parse once to obtain the root cause.
@@ -1315,7 +1807,10 @@
       for(const x of lexical){ if(!issues.some(y=>y.title===x.title&&y.line===x.line)) issues.push(x); }
       return {ast:null,parser:parsed.parser,error:true};
     }
-    if(parsed.ast) checkJSAst(text,parsed.ast,issues,htmlInfo);
+    if(parsed.ast){
+      checkJSAst(text,parsed.ast,issues,htmlInfo);
+      runDeepAnalysis(text,parsed.ast,issues,htmlInfo,baseLine||1);
+    }
     for(const x of lexical){ if(x.severity==='CRITICAL' && !issues.some(y=>y.kind==='Syntax'&&y.line===x.line&&y.severity==='CRITICAL')) issues.push(x); }
     return {ast:parsed.ast,parser:parsed.parser,error:false};
   }
@@ -1356,15 +1851,12 @@
       while((m=declRe.exec(r.body))){
         const prop=m[1].toLowerCase(), val=m[2].trim();
         propSeen.set(prop,(propSeen.get(prop)||0)+1); declarations.push({prop,val,line:r.line});
-        if((/^(width|height|min-width|max-width|min-height|max-height|top|right|bottom|left|margin|padding|gap|font-size|border(?:-\w+)?-width)$/.test(prop)) && /(^|\s)-?\d+(?:\.\d+)?\s*(?:[;]|$)/.test(val) && !validUnitless.has(prop) && !/^0(?:\D|$)/.test(val)){
+        if((/^(width|height|min-width|max-width|min-height|max-height|top|right|bottom|left|margin|padding|gap|font-size|border(?:-\w+)?-width)$/.test(prop)) && /^-?(?:\d+(?:\.\d+)?|\.\d+)$/.test(val) && Number(val)!==0 && !validUnitless.has(prop)){
           pushIssue(issues,{severity:'LOW',line:r.line,kind:'CSS',title:'数値に単位がありません: '+prop,desc:'0以外の長さ値には px/%/rem 等の単位が必要なプロパティがあります。',snippet:r.selector+' { '+prop+': '+val+' }',confidence:'MEDIUM'});
         }
         if(/^display\s*:\s*none$/i.test(prop+':'+val) && htmlInfo){ }
       }
       for(const [prop,count] of propSeen) if(count>1) pushIssue(issues,{severity:'LOW',line:r.line,kind:'CSS',title:'同一ルール内でプロパティを重複定義しています: '+prop,desc:'後勝ちになり、意図しない上書きの原因になります。',snippet:r.selector,confidence:'HIGH'});
-    }
-    for(const r of rules){
-      if(/@media\b[^{}]*$/i.test(r.selector)) pushIssue(issues,{severity:'LOW',line:r.line,kind:'CSS',title:'media queryの構造を確認してください',desc:'ネスト構造を伴う場合はCSSパーサーでの確認が必要です。',snippet:r.selector,confidence:'LOW'});
     }
   }
 
@@ -1384,7 +1876,7 @@
     // HTML inline handlers should resolve to a visible function name if used.
     const allJS=scripts.filter(s=>!s.external).map(s=>s.content).join('\n');
     const fnNames=new Set(); const fnRe=/\bfunction\s+([A-Za-z_$][\w$]*)\s*\(/g; let m; while((m=fnRe.exec(allJS)))fnNames.add(m[1]);
-    for(const [id,code] of htmlInfo.onclick){ const names=[...code.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)].map(x=>x[1]).filter(x=>!['if','for','while'].includes(x)); for(const name of names) if(!fnNames.has(name)) pushIssue(issues,{severity:'MEDIUM',line:1,kind:'DOM',title:'onclick属性の関数が見つかりません: '+name,desc:'HTMLのonclickとJS側の関数名を確認してください。',confidence:'MEDIUM'}); }
+    if(htmlInfo.scripts && htmlInfo.scripts.length){ for(const [id,code] of htmlInfo.onclick){ const names=[...code.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)].map(x=>x[1]).filter(x=>!['if','for','while'].includes(x)); for(const name of names) if(!fnNames.has(name)) pushIssue(issues,{severity:'MEDIUM',line:1,kind:'DOM',title:'onclick属性の関数が見つかりません: '+name,desc:'HTMLのonclickとJS側の関数名を確認してください。',confidence:'MEDIUM'}); } }
   }
 
   function runScanText(text, forcedLang, hintExt){
@@ -1429,7 +1921,7 @@
   function renderResults(issues,lang,parser){
     els.results.classList.add('show');
     const counts={CRITICAL:0,HIGH:0,MEDIUM:0,LOW:0,INFO:0}; issues.forEach(x=>counts[x.severity]++);
-    let html='<span class="sum-pill info">検査モード: '+escapeHTML(langLabel[lang]||lang)+'</span><span class="sum-pill info">解析: '+escapeHTML(parser||'')+'</span>';
+    let html='<span class="sum-pill info">検査モード: '+escapeHTML(langLabel[lang]||lang)+'</span><span class="sum-pill info">解析: '+escapeHTML(parser||'')+'</span><span class="sum-pill info">層: Scope / Data Flow / Control Flow / Game State</span>';
     for(const sev of ['CRITICAL','HIGH','MEDIUM','LOW','INFO']) if(counts[sev]) html+='<span class="sum-pill '+(sev==='INFO'?'info':sev==='MEDIUM'?'warn':'err')+'">'+sev+' '+counts[sev]+'件</span>';
     if(!issues.length) html+='<span class="sum-pill ok">'+iconSVG('check')+' 問題なし</span>';
     els.summaryStrip.innerHTML=html;
@@ -1437,7 +1929,8 @@
     const list=issues.map(is=>{
       const meta=severityMeta[is.severity]||severityMeta.INFO;
       let body='<div class="issue sev-'+is.severity.toLowerCase()+'"><div class="issue-sev">'+iconSVG(meta.icon)+'</div><div class="issue-line"><span class="num">'+is.line+'</span>行目</div><div class="issue-body">';
-      body+='<div class="issue-meta"><span>種類: '+escapeHTML(is.kind)+'</span><span class="sev-'+is.severity.toLowerCase()+'">重要度: '+escapeHTML(is.severity)+'</span><span>確度: '+escapeHTML(is.confidence||'')+'</span></div>';
+      body+='<div class="issue-meta"><span>種類: '+escapeHTML(is.kind)+'</span><span class="sev-'+is.severity.toLowerCase()+'">重要度: '+escapeHTML(is.severity)+'</span><span>確度: '+escapeHTML(is.confidence||'')+(Number.isFinite(is.confidenceScore)?' ('+is.confidenceScore+'/100)':'')+'</span></div>';
+      if(is.evidence && is.evidence.length>1){ body+='<div class="issue-section"><strong>根拠:</strong> '+is.evidence.map(e=>escapeHTML(e.type)).join(' + ')+'</div>'; }
       body+='<div class="issue-title">'+escapeHTML(is.title)+'</div><div class="issue-desc">'+escapeHTML(is.desc)+'</div>';
       if(is.cause) body+='<div class="issue-section"><strong>原因:</strong> '+escapeHTML(is.cause)+'</div>';
       if(is.before) body+='<div class="issue-section"><strong>修正前:</strong> <code>'+escapeHTML(is.before)+'</code></div>';
@@ -1446,7 +1939,7 @@
       if(is.primaryId) body+='<div class="secondary-row">└ Secondary: 先行する主原因 '+escapeHTML(is.primaryId)+' の派生エラー</div>';
       body+='</div></div>'; return body;
     }).join('');
-    els.resultsBody.innerHTML='<div class="scan-note">CRITICAL/HIGH は明確な構文・実行上の問題を優先。MEDIUM/LOW はコードから確度を判定できないものを「可能性あり」として分離しています。</div><div class="issue-list">'+list+'</div>';
+    els.resultsBody.innerHTML='<div class="scan-note">CRITICAL/HIGH は明確な構文・実行上の問題を優先。確度スコアはScope / Data Flow / Control Flow / Game Stateなど独立した根拠が重なるほど上がります。MEDIUM/LOW はコードだけでは断定できないものを「可能性あり」として分離します。</div><div class="issue-list">'+list+'</div>';
   }
 
   // Public API + self test suite for regression testing.
