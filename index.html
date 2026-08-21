@@ -491,17 +491,14 @@
   @media (prefers-reduced-motion: reduce){
     *{transition:none !important;}
   }
+  .analysis-panel{margin-top:14px;padding:0 16px 14px;border:1px solid var(--line);background:var(--bg-2);border-radius:6px;overflow:hidden}
+  .analysis-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;padding-top:12px}
+  .analysis-grid span{font-family:var(--mono);font-size:10.5px;color:var(--text-mid);padding:7px 8px;border:1px solid var(--line);background:var(--bg-1);border-radius:4px}
+  .analysis-note{margin-top:9px;font-size:11.5px;color:var(--text-lo);line-height:1.6}
+  @media (max-width:720px){.analysis-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
 
-  .ai-panel{margin-top:14px;padding:14px 16px;border:1px solid var(--line);background:var(--bg-2);border-radius:6px}
-  .ai-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-  .ai-row label{font-size:12px;color:var(--text-lo)}
-  .ai-row input,.ai-row select{background:var(--bg-1);color:var(--text-hi);border:1px solid var(--line);border-radius:4px;padding:7px 9px;font-family:var(--mono);font-size:12px}
-  .ai-btn{font-family:var(--sans);font-weight:700;font-size:13px;color:var(--bg-0);background:var(--info);border:none;border-radius:var(--radius);padding:9px 14px;cursor:pointer}
-  .ai-btn:disabled{background:var(--bg-3);color:var(--text-lo);cursor:not-allowed}
-  .ai-status{font-family:var(--mono);font-size:11px;color:var(--text-lo);margin-top:8px}
-  .ai-card{margin-top:14px;padding:14px 16px;background:var(--bg-1);border:1px solid var(--line);border-radius:6px}
-  .ai-card h3{font-size:14px;margin:0 0 8px}
-  .ai-card pre{white-space:pre-wrap;overflow:auto;background:var(--bg-0);padding:10px;border-radius:4px;border:1px solid var(--line);font:12px/1.6 var(--mono);color:var(--text-mid)}
+
+
 
 </style>
 </head>
@@ -515,16 +512,16 @@
     <div>
       <div class="brand-mark">
         <span class="glyph">&lt;/&gt;</span>
-        <h1>コード検査室<span class="en">LINT BENCH — semantic review v4</span></h1>
+        <h1>コード検査室<span class="en">LINT BENCH — semantic review v5 — static multi-angle</span></h1>
       </div>
-      <p class="subline">HTML・CSS・JavaScript・Python・JSON のコードを貼り付けるか .txt / ソースファイルをアップロードすると、よくある構文ミスや不具合の兆候をブラウザ内だけで検査します。</p>
+      <p class="subline">HTML・CSS・JavaScript・TypeScript・Python・Java・C/C++・C#・Go・Rust・PHP・Ruby・SQL・Kotlin・Swift・JSON のコードを貼り付けるか .txt / ソースファイルをアップロードすると、よくある構文ミスや不具合の兆候をブラウザ内だけで多角的に検査します。</p>
     </div>
     <div class="lang-chips" aria-hidden="true">
       <span class="chip">HTML</span>
       <span class="chip">CSS</span>
       <span class="chip">JavaScript</span>
       <span class="chip">Python</span>
-      <span class="chip">JSON</span>
+      <span class="chip">JSON</span><span class="chip">TypeScript</span><span class="chip">Java</span><span class="chip">C/C++</span><span class="chip">C#</span><span class="chip">Go</span><span class="chip">Rust</span><span class="chip">PHP</span><span class="chip">Ruby</span><span class="chip">SQL</span><span class="chip">Kotlin</span><span class="chip">Swift</span>
     </div>
   </header>
 
@@ -549,6 +546,18 @@
         <option value="js">JavaScript</option>
         <option value="py">Python</option>
         <option value="json">JSON</option>
+        <option value="ts">TypeScript</option>
+        <option value="java">Java</option>
+        <option value="c">C</option>
+        <option value="cpp">C++</option>
+        <option value="cs">C#</option>
+        <option value="go">Go</option>
+        <option value="rust">Rust</option>
+        <option value="php">PHP</option>
+        <option value="ruby">Ruby</option>
+        <option value="sql">SQL</option>
+        <option value="kotlin">Kotlin</option>
+        <option value="swift">Swift</option>
       </select>
     </div>
   </div>
@@ -576,9 +585,9 @@
     <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="ファイルを選択またはドラッグ&ドロップ">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
       <div class="dz-title">クリックして選択、またはドラッグ&ドロップ</div>
-      <div class="dz-sub">対応: <span class="accent">.txt</span> / .html / .css / .js / .py / .json（テキスト形式のみ・最大 2MB）</div>
+      <div class="dz-sub">対応: <span class="accent">.txt</span> / .html / .css / .js / .ts / .py / .java / .c / .cpp / .cs / .go / .rs / .php / .rb / .sql / .kt / .swift / .json（テキスト形式のみ・最大 2MB）</div>
     </div>
-    <input type="file" id="fileInput" accept=".txt,.html,.htm,.css,.js,.jsx,.py,.json">
+    <input type="file" id="fileInput" accept=".txt,.html,.htm,.css,.js,.jsx,.mjs,.ts,.tsx,.py,.json,.java,.c,.h,.cc,.cpp,.cxx,.hpp,.cs,.go,.rs,.php,.rb,.sql,.kt,.kts,.swift">
     <div class="file-badge" id="fileBadge">
       <span>読み込み済み: <span class="fname" id="fnameDisplay"></span></span>
       <button id="clearFileBtn" type="button">クリア</button>
@@ -593,21 +602,16 @@
     <span class="run-meta" id="runMeta">コードを入力すると実行できます</span>
   </div>
 
-  <div class="ai-panel">
-    <div class="panel-head" style="margin:-14px -16px 12px;border-radius:6px 6px 0 0;">
-      <span class="ptitle">AI SECOND OPINION / MULTI-PASS VERIFICATION</span>
-      <span class="ptitle">Static findings → AI analyst → adversarial verifier → judge</span>
+  <div class="analysis-panel">
+    <div class="panel-head">
+      <span class="ptitle">STATIC VERIFICATION STACK</span>
+      <span class="ptitle">ブラウザ内だけで多角的に照合</span>
     </div>
-    <div class="ai-row">
-      <label for="aiEndpoint">AI Bridge</label>
-      <input id="aiEndpoint" value="https://the-bug-eta.vercel.app/api/review" size="34" spellcheck="false">
-      <label for="aiModel">Model</label>
-      <input id="aiModel" value="gpt-5.6-sol" size="16" spellcheck="false">
-      <label for="aiPasses">Passes</label>
-      <select id="aiPasses"><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option></select>
-      <button class="ai-btn" id="aiReviewBtn" type="button" disabled>AIで再検証する</button>
+    <div class="analysis-grid">
+      <span>01 Syntax / Parse</span><span>02 AST / Scope</span><span>03 Data Flow</span><span>04 Control Flow</span>
+      <span>05 DOM / CSS Link</span><span>06 Storage / Async</span><span>07 Game State</span><span>08 Security / Runtime</span>
     </div>
-    <div class="ai-status" id="aiStatus">ローカルAI Bridge未接続。通常の静的解析はそのまま利用できます。</div>
+    <div class="analysis-note">単発の文字列検出だけで断定せず、構文・AST・スコープ・データフロー・制御フロー・DOM/CSS対応・保存/非同期・ゲーム状態の複数根拠を突き合わせます。</div>
   </div>
 
   <section id="results">
@@ -619,7 +623,7 @@
   </section>
 
   <footer class="note">
-    ※ 通常の静的解析はブラウザ内で実行します。AI再検証を有効にした場合のみ、設定したAI Bridgeへコードと解析結果を送信します。APIキーはブラウザへ埋め込まず、Bridge側の環境変数で管理してください。
+    ※ 通常の静的解析はブラウザ内で実行します。構文・AST・スコープ・データフロー・制御フロー・DOM/CSS対応・保存/非同期・ゲーム状態などの静的解析をブラウザ内で実行します。外部APIへの送信は行いません。
   </footer>
 
 </div>
@@ -647,11 +651,6 @@
     results: document.getElementById('results'),
     summaryStrip: document.getElementById('summaryStrip'),
     resultsBody: document.getElementById('resultsBody'),
-    aiEndpoint: document.getElementById('aiEndpoint'),
-    aiModel: document.getElementById('aiModel'),
-    aiPasses: document.getElementById('aiPasses'),
-    aiReviewBtn: document.getElementById('aiReviewBtn'),
-    aiStatus: document.getElementById('aiStatus'),
   };
 
   let state = {
@@ -659,7 +658,6 @@
     fileText: '',
     fileName: '',
     lastScan: null,
-    lastAI: null,
   };
 
   /* ---------------- タブ切替 ---------------- */
@@ -712,7 +710,7 @@
 
   function autoDetectFromName(name){
     const ext = (name.split('.').pop() || '').toLowerCase();
-    const map = { html:'html', htm:'html', css:'css', js:'js', jsx:'js', py:'py', json:'json' };
+    const map = { html:'html', htm:'html', css:'css', js:'js', jsx:'js', mjs:'js', ts:'ts', tsx:'ts', py:'py', json:'json', java:'java', c:'c', h:'c', cc:'cpp', cpp:'cpp', cxx:'cpp', hpp:'cpp', cs:'cs', go:'go', rs:'rust', php:'php', rb:'ruby', sql:'sql', kt:'kotlin', kts:'kotlin', swift:'swift' };
     if (map[ext] && els.langSelect.value === 'auto'){
       // ヒントとして保持のみ。ユーザーがセレクトを操作していなければ auto のまま解析側で使う
       els.dropzone.dataset.detected = map[ext];
@@ -870,6 +868,17 @@
     const t=text.trim();
     if(/^<!doctype\b/i.test(t) || /^<html\b/i.test(t) || /<(head|body|script|style|div|main|button|form)\b/i.test(t)) return 'html';
     if(/^\s*[\[{]/.test(t)){ try{ JSON.parse(t); return 'json'; }catch(_){} }
+    if(/\b(interface|type|enum|namespace)\s+[A-Za-z_$][\w$]*\s*(?:[={]|extends\b)/.test(t) && /:\s*(string|number|boolean|unknown|any|void|never)\b/.test(t)) return 'ts';
+    if(/\b(package\s+[A-Za-z_][\w.]*;|import\s+[\w.]+;|public\s+(?:static\s+)?(?:class|interface)|System\.out\.println|@Override)\b/.test(t)) return 'java';
+    if(/#include\s*<[^>]+>|\b(int|char|float|double|size_t)\s+main\s*\(/.test(t) && /;/.test(t)) return /\bstd::|#include\s*<iostream>|using\s+namespace\s+std/.test(t) ? 'cpp' : 'c';
+    if(/\b(namespace|using)\s+[A-Za-z_][\w.]*\s*;|\b(Console\.WriteLine|public\s+class|using\s+System)\b/.test(t)) return 'cs';
+    if(/\bpackage\s+main\b|\bfunc\s+\w+\s*\(|\bfmt\.Println\b|:=/.test(t)) return 'go';
+    if(/\b(fn|let|mut|impl|trait|match|println!)\b/.test(t) && /\bfn\s+main\b|->\s*[A-Za-z_][\w:]*/.test(t)) return 'rust';
+    if(/<\?php\b|\$[A-Za-z_][\w]*\s*=|->\s*[A-Za-z_][\w]*/.test(t) && /\b(echo|function|namespace)\b/.test(t)) return 'php';
+    if(/\b(def|class|module|require|attr_reader|puts)\b/.test(t) && /\bdo\b|\bend\b/.test(t)) return 'ruby';
+    if(/\b(SELECT|INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|CREATE\s+TABLE|ALTER\s+TABLE)\b/i.test(t)) return 'sql';
+    if(/\b(fun|data\s+class|sealed\s+class|object)\b/.test(t) && /\bval\s+\w+\s*:|\bvar\s+\w+\s*:/.test(t)) return 'kotlin';
+    if(/\b(import\s+Foundation|struct\s+\w+\s*:\s*|func\s+\w+\s*\(|let\s+\w+\s*=)/.test(t) && /\b(var|let|func|guard|if)\b/.test(t)) return 'swift';
     if(/(^|\n)\s*(def\s|from\s+.+\s+import\s|import\s+\w+|class\s+\w+\s*:|elif\s|except\s)/.test(t)) return 'py';
     if(/(^|\n)\s*[^{}]+\{[^{}]*:[^{}]*;/.test(t) && !/\b(function|const|let|var)\b/.test(t)) return 'css';
     return 'js';
@@ -1294,7 +1303,8 @@
       if(declaredGlobals.has(r.name))continue;
       const found=state.resolve(r.name,r.scope);
       if(!found){
-        const issue={severity:'MEDIUM',line:state.baseLine+r.line-1,kind:'Scope',title:'未宣言の識別子を参照しています: '+r.name,desc:'現在のスコープ階層から宣言元を確認できません。外部ライブラリや別script由来なら誤検出の可能性があります。',snippet:getLineText(state.lines,r.line),confidence:'MEDIUM'};
+        const htmlGlobalCandidate=htmlInfo && htmlInfo.ids && htmlInfo.ids.has(r.name);
+        const issue={severity:htmlGlobalCandidate?'LOW':'MEDIUM',line:state.baseLine+r.line-1,kind:'Scope',title:'未宣言の識別子を参照しています: '+r.name,desc:htmlGlobalCandidate?'HTMLのidから暗黙に作られるグローバルを参照している可能性があります。ブラウザ依存を避けるため getElementById 等で明示参照してください。':'現在のスコープ階層から宣言元を確認できません。外部ライブラリや別script由来なら誤検出の可能性があります。',snippet:getLineText(state.lines,r.line),confidence:htmlGlobalCandidate?'LOW':'MEDIUM'};
         const id=pushIssue(issues,issue); addEvidence(issue,'scope-resolution',55,'現在のスコープチェーンに宣言がない'); addEvidence(issue,'identifier-reference',20,'AST上で参照位置が確認できる'); fuseConfidence(issue); missing.push({name:r.name,line:r.line});
       }
     }
@@ -1542,7 +1552,8 @@
       if(n.type==='ExpressionStatement' && n.expression?.type==='Identifier' && funcs.has(n.expression.name)) pushIssue(issues,{severity:'LOW',line:ln,kind:'Logic Bug',title:'関数を呼び出さず参照しています: '+n.expression.name,desc:'関数名だけを置くと、関数は実行されません。必要なら '+n.expression.name+'() としてください。',snippet:getLineText(lines,ln),before:getLineText(lines,ln),after:getLineText(lines,ln).replace(new RegExp('\\b'+escReg(n.expression.name)+'\\b'),'$&()'),confidence:'HIGH'});
       if(n.type==='CallExpression' && n.callee?.type==='Identifier' && funcs.has(n.callee.name)){
         const f=funcs.get(n.callee.name), argc=n.arguments.length;
-        if(argc<f.count || argc>f.count) pushIssue(issues,{severity:'MEDIUM',line:ln,kind:'Logic Bug',title:'関数引数の個数が宣言と一致しません: '+n.callee.name,desc:'宣言: '+f.count+'個 / 呼び出し: '+argc+'個。rest parameter や default parameter の場合は警告を読み替えてください。',snippet:getLineText(lines,ln),confidence:'MEDIUM'});
+        const fnNodeCount=f.count;
+        if(argc<fnNodeCount || argc>fnNodeCount) pushIssue(issues,{severity:'LOW',line:ln,kind:'Logic Bug',title:'関数引数の個数を確認してください: '+n.callee.name,desc:'宣言: '+fnNodeCount+'個 / 呼び出し: '+argc+'個。JavaScriptでは引数不足・余分が合法なため、仕様依存の確認事項として扱います。',snippet:getLineText(lines,ln),confidence:'LOW'});
       }
       if(n.type==='ArrayExpression'){
         // no-op; indexed access is checked below
@@ -1558,7 +1569,12 @@
       if(n.type==='IfStatement' && n.test?.type==='Literal' && typeof n.test.value==='boolean') pushIssue(issues,{severity:'MEDIUM',line:ln,kind:'Logic Bug',title:'常に'+(n.test.value?'true':'false')+'になる条件',desc:'条件がリテラルで固定されています。意図したデバッグコードか確認してください。',snippet:getLineText(lines,ln),confidence:'CERTAIN'});
       if(n.type==='ForStatement'){
         const t=n.test;
-        if(t?.type==='BinaryExpression' && t.operator==='<=' && t.right?.type==='MemberExpression' && t.right.property?.name==='length') pushIssue(issues,{severity:'LOW',line:ln,kind:'Logic Bug',title:'forループの境界がoff-by-oneの可能性',desc:'i <= array.length は最後に array[array.length] を参照することがあります。通常は i < array.length です。',snippet:getLineText(lines,ln),confidence:'LOW'});
+        if(t?.type==='BinaryExpression' && t.operator==='<=' && t.right?.type==='MemberExpression' && t.right.property?.name==='length'){
+          const bodyText=JSON.stringify(n.body||'');
+          const target=t.right.object?.name;
+          const indexed=target && new RegExp('\\['+'\\s*'+escReg((n.init?.declarations?.[0]?.id?.name)||'i')+'\\s*\\]').test(bodyText);
+          if(indexed) pushIssue(issues,{severity:'MEDIUM',line:ln,kind:'Logic Bug',title:'forループの境界がoff-by-oneになる可能性',desc:'配列添字を使うループで i <= array.length になっています。最後に array[array.length] を参照する経路が生じます。',snippet:getLineText(lines,ln),confidence:'HIGH'});
+        }
       }
       if(n.type==='WhileStatement'){
         if(n.test?.type==='Literal' && n.test.value===true) pushIssue(issues,{severity:'HIGH',line:ln,kind:'Logic Bug',title:'終了条件のないwhile(true)です',desc:'break/returnなどの明示的脱出がなければ無限ループになります。',snippet:getLineText(lines,ln),confidence:'CERTAIN'});
@@ -1569,9 +1585,6 @@
       if(n.type==='BinaryExpression' && n.operator==='/' && n.right?.type==='Literal' && n.right.value===0) pushIssue(issues,{severity:'HIGH',line:ln,kind:'Logic Bug',title:'0除算',desc:'0で割るため Infinity / NaN が発生します。',snippet:getLineText(lines,ln),confidence:'CERTAIN'});
       if(n.type==='CallExpression' && n.callee?.type==='MemberExpression'){
         const obj=n.callee.object, prop=n.callee.property?.name;
-        if(obj?.type==='Identifier' && obj.name==='JSON' && prop==='parse'){
-          pushIssue(issues,{severity:'MEDIUM',line:ln,kind:'非同期',title:'JSON.parse の失敗時処理を確認してください',desc:'不正JSONでは例外になります。ユーザー入力・localStorage・通信データなら try/catch を検討してください。',snippet:getLineText(lines,ln),confidence:'MEDIUM'});
-        }
         if(obj?.type==='Identifier' && (obj.name==='localStorage'||obj.name==='sessionStorage') && prop==='getItem'){
           pushIssue(issues,{severity:'MEDIUM',line:ln,kind:'保存',title:obj.name+'.getItem() は null を返す可能性があります',desc:'初回起動や削除後に null になり得るため、直後に JSON.parse / プロパティアクセスする場合はガードが必要です。',snippet:getLineText(lines,ln),confidence:'HIGH'});
         }
@@ -1896,6 +1909,114 @@
     }
   }
 
+  function checkGeneralCompiledLanguage(text, lines, issues, lang){
+    const emit=(line,opts)=>pushIssue(issues,Object.assign({line},opts));
+    const stripped=text.replace(/\/\*[\s\S]*?\*\//g,'').replace(/\/\/.*$/gm,'');
+    const fileLines=lines;
+    const cfg={
+      ts:{name:'TypeScript', block:/{|}/g, keyword:/\b(interface|type|enum|namespace|class|function|const|let|var)\b/, semicolon:true},
+      java:{name:'Java', block:/{|}/g, keyword:/\b(class|interface|public|private|protected|static|final|void|new)\b/, semicolon:true},
+      c:{name:'C', block:/{|}/g, keyword:/\b(int|char|float|double|void|struct|typedef|return|if|for|while)\b/, semicolon:true},
+      cpp:{name:'C++', block:/{|}/g, keyword:/\b(class|struct|namespace|template|auto|constexpr|std|int|void|return)\b/, semicolon:true},
+      cs:{name:'C#', block:/{|}/g, keyword:/\b(class|struct|namespace|using|public|private|async|await|var|new)\b/, semicolon:true},
+      go:{name:'Go', block:/{|}/g, keyword:/\b(package|import|func|type|struct|interface|defer|go|range)\b/, semicolon:false},
+      rust:{name:'Rust', block:/{|}/g, keyword:/\b(fn|let|mut|impl|trait|struct|enum|match|use|pub|async|await)\b/, semicolon:true},
+      php:{name:'PHP', block:/{|}/g, keyword:/\b(class|function|namespace|use|echo|return|foreach)\b/, semicolon:true},
+      ruby:{name:'Ruby', block:/\b(do|end)\b/g, keyword:/\b(def|class|module|if|unless|case|begin|rescue|ensure)\b/, semicolon:false},
+      kotlin:{name:'Kotlin', block:/{|}/g, keyword:/\b(fun|class|object|data|sealed|when|val|var|suspend)\b/, semicolon:false},
+      swift:{name:'Swift', block:/{|}/g, keyword:/\b(func|class|struct|enum|protocol|extension|guard|let|var|import)\b/, semicolon:false}
+    }[lang];
+    if(!cfg) return;
+    // Balanced delimiter scan, ignoring quoted strings and comments.
+    let stack=[]; let state='code'; let quote='';
+    for(let i=0;i<text.length;i++){
+      const c=text[i], n=text[i+1];
+      if(state==='line'){if(c==='\n')state='code';continue;}
+      if(state==='block'){if(c==='*'&&n==='/'){state='code';i++;}continue;}
+      if(state==='string'){if(c==='\\'){i++;continue;} if(c===quote){state='code';quote='';} continue;}
+      if(c==='/'&&n==='/'){state='line';i++;continue;}
+      if(c==='/'&&n==='*'){state='block';i++;continue;}
+      if(c==='"'||c==="'"||c==='`'){state='string';quote=c;continue;}
+      if(c==='('||c==='['||c==='{') stack.push({c,line:lineAt(text,i)});
+      if(c===')'||c===']'||c==='}'){ const want=c==='('?')':c==='['?']':'}'; const top=stack[stack.length-1]; if(!top||top.c!==({')':'(',']':'[','}':'{'}[c])){ emit(lineAt(text,i),{severity:'CRITICAL',kind:'Syntax',title:cfg.name+' の括弧対応エラー',desc:'対応する開き括弧がありません、または入れ子順が崩れています。',snippet:getLineText(fileLines,lineAt(text,i)),confidence:'CERTAIN'}); } else stack.pop(); }
+    }
+    if(stack.length) emit(stack[stack.length-1].line,{severity:'CRITICAL',kind:'Syntax',title:cfg.name+' の括弧閉じ忘れ',desc:'開いた括弧に対応する閉じ括弧がありません。',snippet:getLineText(fileLines,stack[stack.length-1].line),confidence:'CERTAIN'});
+
+    for(let i=0;i<fileLines.length;i++){
+      const raw=fileLines[i], line=raw.trim(); if(!line) continue;
+      if(/^\s*(if|for|while|switch|catch|foreach)\s*\(/.test(line) && /=(?!=|>)/.test(line) && !/==|===|<=|>=/.test(line) && lang!=='ruby'){
+        emit(i+1,{severity:'HIGH',kind:'Logic Bug',title:cfg.name+' の条件式に代入「=」があります',desc:'比較条件のつもりなら == / === /適切な比較演算子を使ってください。',snippet:line,confidence:'HIGH'});
+      }
+      if(/\b(?:int|long|float|double|decimal|number|f64|i32|i64|u32|u64)\b[^;=]*\/\s*0\b/.test(line)) emit(i+1,{severity:'HIGH',kind:'Runtime',title:cfg.name+' の0除算',desc:'0で除算する経路が静的に確認できます。',snippet:line,confidence:'CERTAIN'});
+      if(/\b(Math\.rand|rand\(\)|random\(\)|Random\(\))/.test(line) && /\[.*\]/.test(line) && /\.length\s*\+\s*1|\.size\s*\+\s*1/.test(line)) emit(i+1,{severity:'HIGH',kind:'Logic Bug',title:cfg.name+' のランダム配列添字が範囲外になる可能性',desc:'配列長に1を足すと末尾の範囲外添字が選ばれます。',snippet:line,confidence:'HIGH'});
+      if(/\b(indexOf|find|position)\b.*\n?.*\bsplice\s*\(\s*-?1\b/.test(stripped.slice(Math.max(0,stripped.indexOf(raw)), Math.max(0,stripped.indexOf(raw))+500))) emit(i+1,{severity:'HIGH',kind:'Logic Bug',title:cfg.name+' の検索失敗値を削除処理に使う可能性',desc:'indexOf/findが見つからない値をそのまま削除APIへ渡す構造は誤削除の原因になります。',snippet:line,confidence:'MEDIUM'});
+      if(/\b(null|nil|None)\b/.test(line) && /\.|->|\?\./.test(line) && !/\b(if|guard|match|switch|case|unless)\b/.test(line)) emit(i+1,{severity:'MEDIUM',kind:'Runtime',title:cfg.name+' のnull/nil経路を確認',desc:'null/nil可能な値の直後にメンバーアクセスがあります。null安全機構がある言語では、その機構を使っているか確認してください。',snippet:line,confidence:'MEDIUM'});
+      if(/\b(?:password|token|secret|api[_-]?key)\b\s*[=:]\s*["'][^"']+["']/.test(line) && lang!=='sql') emit(i+1,{severity:'HIGH',kind:'Security',title:cfg.name+' に認証情報がハードコードされています',desc:'パスワード・トークン・APIキーらしき値がソースに直接埋め込まれています。',snippet:line,confidence:'HIGH'});
+      if(/\b(?:catch|rescue)\b[^{}]*\{?\s*\}?$/.test(line) && /catch|rescue/.test(line)) emit(i+1,{severity:'LOW',kind:'Error Handling',title:cfg.name+' の空に近い例外処理',desc:'例外を握りつぶしている可能性があります。ログや適切なリカバリを確認してください。',snippet:line,confidence:'MEDIUM'});
+      if(/\b(?:TODO|FIXME|HACK)\b/i.test(line)) emit(i+1,{severity:'INFO',kind:'Maintainability',title:cfg.name+' のTODO/FIXMEコメント',desc:'未完了・暫定実装の印です。バグとは限りません。',snippet:line,confidence:'INFO'});
+      if(cfg.semicolon && /\b(?:return|break|continue|throw|[A-Za-z_][\w<>\[\],:*&?]*\s+[A-Za-z_][\w]*\s*=)\b/.test(line) && !/[;{}:]$/.test(line) && !/^(if|for|while|switch|class|struct|interface|namespace)\b/.test(line)) emit(i+1,{severity:'LOW',kind:'Syntax',title:cfg.name+' の文末セミコロンを確認',desc:'この形式では文末にセミコロンが必要な場合があります。',snippet:line,confidence:'LOW'});
+    }
+
+    // Language-specific precision rules.
+    if(lang==='ts'){
+      fileLines.forEach((l,i)=>{
+        if(/:\s*(string|number|boolean)\b\s*=\s*(null|undefined)\b/.test(l)) emit(i+1,{severity:'HIGH',kind:'Type',title:'TypeScriptの型とnull代入が矛盾しています',desc:'strictNullChecks環境では型エラーになります。',snippet:l.trim(),confidence:'HIGH'});
+        if(/\bas\s+any\b/.test(l)) emit(i+1,{severity:'LOW',kind:'Type',title:'TypeScriptでanyへの型逃げがあります',desc:'バグとは限りませんが、型安全性を失います。',snippet:l.trim(),confidence:'INFO'});
+      });
+    }
+    if(lang==='java'){
+      fileLines.forEach((l,i)=>{
+        if(/==\s*["']|["'].*==/.test(l)) emit(i+1,{severity:'HIGH',kind:'Logic Bug',title:'JavaでStringを==比較しています',desc:'String内容比較は通常 equals() を使います。',snippet:l.trim(),confidence:'HIGH'});
+        if(/\bpublic\s+static\s+void\s+main\s*\(/.test(l)===false && /\bSystem\.out\.println\s*\(/.test(l) && /;?$/.test(l)===false) emit(i+1,{severity:'LOW',kind:'Syntax',title:'Java文末を確認してください',desc:'通常の文にはセミコロンが必要です。',snippet:l.trim(),confidence:'LOW'});
+      });
+    }
+    if(lang==='c' || lang==='cpp' || lang==='cs'){
+      fileLines.forEach((l,i)=>{
+        if(/\b(?:malloc|calloc|realloc|new)\s*\(/.test(l) && !/\bfree\s*\(|\bdelete\b/.test(text)) emit(i+1,{severity:'MEDIUM',kind:'Memory',title:cfg.name+' のメモリ解放経路を確認',desc:'動的メモリ確保があるため、解放漏れがないか確認してください。',snippet:l.trim(),confidence:'MEDIUM'});
+        if(/\bstrcpy\s*\(|\bstrcat\s*\(|\bsprintf\s*\(/.test(l)) emit(i+1,{severity:'HIGH',kind:'Security',title:cfg.name+' の危険なC系文字列API',desc:'バッファサイズ管理が弱いAPIのため、入力長によってバッファオーバーフローを起こす可能性があります。',snippet:l.trim(),confidence:'HIGH'});
+      });
+    }
+    if(lang==='go'){
+      if(/\bdefer\s+.*\bClose\(\)/.test(text) && !/\bif\s+err\s*!=\s*nil/.test(text)) emit(1,{severity:'LOW',kind:'Error Handling',title:'GoのI/Oエラー確認を確認',desc:'CloseやWrite等のエラーを無視している可能性があります。',confidence:'LOW'});
+      fileLines.forEach((l,i)=>{ if(/\bgo\s+/.test(l) && !/\bcontext\.|\bWaitGroup\b|\bchannel\b/.test(text)) emit(i+1,{severity:'LOW',kind:'Concurrency',title:'Go goroutineの終了管理を確認',desc:'goroutineのライフサイクルや終了待ちが必要か確認してください。',snippet:l.trim(),confidence:'LOW'}); });
+    }
+    if(lang==='rust'){
+      fileLines.forEach((l,i)=>{ if(/\.unwrap\s*\(\s*\)/.test(l)) emit(i+1,{severity:'LOW',kind:'Runtime',title:'Rustでunwrap()を使用しています',desc:'想定外のErr/Noneでpanicする可能性があります。',snippet:l.trim(),confidence:'MEDIUM'}); });
+    }
+    if(lang==='php'){
+      fileLines.forEach((l,i)=>{ if(/\$_(GET|POST|REQUEST|COOKIE)\s*\[/.test(l) && /(mysql_query|query\s*\(|exec\s*\()/.test(text)) emit(i+1,{severity:'HIGH',kind:'Security',title:'PHPの外部入力がSQL処理へ流れる可能性',desc:'SQLパラメータ化・プレースホルダ利用を確認してください。',snippet:l.trim(),confidence:'MEDIUM'}); });
+    }
+    if(lang==='ruby'){
+      fileLines.forEach((l,i)=>{ if(/\beval\s*\(/.test(l)) emit(i+1,{severity:'HIGH',kind:'Security',title:'Rubyのeval使用',desc:'外部入力が混ざると任意コード実行につながる可能性があります。',snippet:l.trim(),confidence:'HIGH'}); });
+    }
+    if(lang==='kotlin'){
+      fileLines.forEach((l,i)=>{ if(/!!\./.test(l)) emit(i+1,{severity:'LOW',kind:'Runtime',title:'Kotlinの非null断言「!!」',desc:'null時にKotlinNullPointerExceptionになる可能性があります。',snippet:l.trim(),confidence:'MEDIUM'}); });
+    }
+    if(lang==='swift'){
+      fileLines.forEach((l,i)=>{ if(/\btry!/.test(l)) emit(i+1,{severity:'HIGH',kind:'Runtime',title:'Swiftのtry!で例外を強制アンラップ',desc:'失敗時に実行時クラッシュします。do-catch / try? / try? async等を検討してください。',snippet:l.trim(),confidence:'HIGH'}); });
+    }
+  }
+
+  function checkSQL(text, lines, issues){
+    const emit=(line,opts)=>pushIssue(issues,Object.assign({line},opts));
+    let state='code', quote=''; let depth=0;
+    for(let i=0;i<text.length;i++){
+      const c=text[i], n=text[i+1];
+      if(state==='string'){ if(c===quote){ if(text[i+1]===quote)i++; else state='code'; } continue; }
+      if(c==='\''||c==='"'||c==='`'){state='string';quote=c;continue;}
+      if(c==='(')depth++; if(c===')'){if(depth===0)emit(lineAt(text,i),{severity:'CRITICAL',kind:'Syntax',title:'SQLの閉じ括弧が余分です',desc:'対応する開き括弧がありません。',snippet:getLineText(lines,lineAt(text,i)),confidence:'CERTAIN'}); else depth--;}
+    }
+    if(depth>0) emit(1,{severity:'CRITICAL',kind:'Syntax',title:'SQLの括弧閉じ忘れ',desc:'開き括弧に対応する閉じ括弧がありません。',confidence:'CERTAIN'});
+    lines.forEach((raw,i)=>{
+      const l=raw.trim(); if(!l)return;
+      if(/\bSELECT\b/i.test(l) && /\bFROM\b/i.test(l) && !/\bWHERE\b|\bLIMIT\b|\bJOIN\b/i.test(l) && /\bUPDATE|DELETE\b/i.test(l)) emit(i+1,{severity:'LOW',kind:'SQL',title:'SQLの絞り込み条件を確認',desc:'更新・削除クエリでWHEREがない構造は全行対象になる可能性があります。',snippet:l,confidence:'MEDIUM'});
+      if(/\b(UPDATE|DELETE)\s+\w+/i.test(l) && !/\bWHERE\b/i.test(l)) emit(i+1,{severity:'HIGH',kind:'SQL Safety',title:'WHEREなしのUPDATE/DELETE',desc:'テーブル全体を更新・削除する可能性があります。',snippet:l,confidence:'HIGH'});
+      if(/\bSELECT\s+\*/i.test(l)) emit(i+1,{severity:'LOW',kind:'Performance',title:'SELECT * の使用',desc:'必要な列だけ取得するほうが変更耐性と転送量の面で安全です。',snippet:l,confidence:'LOW'});
+      if(/\bUNION\b/i.test(l) && !/\bUNION\s+ALL\b/i.test(l)) emit(i+1,{severity:'INFO',kind:'Performance',title:'UNIONは重複除去を行います',desc:'重複が不要ならUNION ALLのほうが高速な場合があります。バグとは限りません。',snippet:l,confidence:'INFO'});
+      if(/['"]\s*\+\s*\$|['"]\s*\|\|\s*\w+/i.test(l)) emit(i+1,{severity:'HIGH',kind:'Security',title:'SQL文字列連結を確認',desc:'外部入力を文字列連結している場合、SQLインジェクションにつながる可能性があります。',snippet:l,confidence:'HIGH'});
+    });
+  }
+
   function checkPY(text, lines, issues){
     lines.forEach((l,i)=>{
       const c=l.replace(/#.*$/,'').trim(); if(!c)return;
@@ -1915,6 +2036,46 @@
     if(htmlInfo.scripts && htmlInfo.scripts.length){ for(const [id,code] of htmlInfo.onclick){ const names=[...code.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)].map(x=>x[1]).filter(x=>!['if','for','while'].includes(x)); for(const name of names) if(!fnNames.has(name)) pushIssue(issues,{severity:'MEDIUM',line:1,kind:'DOM',title:'onclick属性の関数が見つかりません: '+name,desc:'HTMLのonclickとJS側の関数名を確認してください。',confidence:'MEDIUM'}); } }
   }
 
+  function finalizeStaticIssues(issues, lang, text, htmlInfo){
+    const out=[];
+    const seen=new Map();
+    const rootKey=(it)=>{
+      const t=(it.title||'')+' '+(it.desc||'');
+      if(/未定義DOM要素を参照しています|存在しないidへの参照/.test(t)) return 'dom:'+it.line;
+      if(/storageメソッド|localStorage\.clear/.test(t)) return 'storage-call:'+it.line;
+      if(/ランダム配列添字/.test(t)) return 'random-index:'+it.line;
+      if(/敵HPの減算処理/.test(t)) return 'enemy-hp:'+it.line;
+      if(/XPの減算結果/.test(t)) return 'xp:'+it.line;
+      if(/所持金.*文字列|ゲーム状態への「\+= 文字列」/.test(t)) return 'numeric-string:'+it.line;
+      if(/if条件に代入|ゲーム状態の条件式が代入/.test(t)) return 'assignment-cond:'+it.line;
+      if(/正規表現リテラルが正しく閉じられていません|SyntaxError/.test(t)) return 'syntax:'+it.line;
+      return [it.severity,it.kind,it.line,it.title].join('|');
+    };
+    for(const raw of issues){
+      const it={...raw,evidence:[...(raw.evidence||[])]};
+      if(!it.evidence?.length){
+        const et=it.kind==='Syntax'?'syntax-parser':it.kind==='Scope'?'scope-resolution':it.kind==='DOM'||it.kind==='HTML'?'cross-link':it.kind==='CSS'?'css-structure':it.kind==='非同期'?'async-contract':it.kind==='保存'?'storage-contract':it.kind==='Game Logic'?'semantic-rule':'static-rule';
+        addEvidence(it,et,it.confidence==='CERTAIN'?70:it.confidence==='HIGH'?48:it.confidence==='MEDIUM'?28:12,'静的解析レイヤーで検出');
+      }
+      const k=rootKey(it);
+      if(seen.has(k)){
+        const ex=seen.get(k);
+        for(const e of it.evidence||[]) if(!ex.evidence.some(x=>x.type===e.type)) ex.evidence.push(e);
+        if((SEVERITY_RANK[it.severity]??4)<(SEVERITY_RANK[ex.severity]??4)) ex.severity=it.severity;
+        fuseConfidence(ex);
+      }else{
+        fuseConfidence(it);
+        seen.set(k,it); out.push(it);
+      }
+    }
+    // Precision guardrails: do not present weak generic warnings as bugs.
+    for(const it of out){
+      if(it.confidenceScore<25 && it.severity==='LOW') it.confidence='INFO';
+      if(it.confidence==='MEDIUM' && !it.before && !it.after && !it.evidence?.some(e=>e.weight>=50)) it.confidenceScore=Math.min(it.confidenceScore||50,59);
+    }
+    return out.sort((a,b)=>(SEVERITY_RANK[a.severity]-SEVERITY_RANK[b.severity]) || (b.confidenceScore||0)-(a.confidenceScore||0) || a.line-b.line);
+  }
+
   function runScanText(text, forcedLang, hintExt){
     const lang=forcedLang&&forcedLang!=='auto'?forcedLang:detectLanguage(text,hintExt); const lines=text.split('\n'); let issues=[];
     let htmlInfo=null, scripts=[], styles=[];
@@ -1930,20 +2091,21 @@
     else if(lang==='css') checkCSS(text,lines,issues,null,1);
     else if(lang==='py') checkPY(text,lines,issues);
     else if(lang==='json') checkJSON(text,lines,issues);
+    else if(lang==='sql') checkSQL(text,lines,issues);
+    else if(['ts','java','c','cpp','cs','go','rust','php','ruby','kotlin','swift'].includes(lang)) checkGeneralCompiledLanguage(text,lines,issues,lang);
     // No generic cross-language bracket checker: it was the main source of JS-in-string false positives.
-    return {lang,issues:dedupeIssues(issues),parser:lang==='html'?'HTML + embedded AST':lang==='js'?(window.acorn?'Acorn AST':'Native parser fallback'):'dedicated parser'};
+    const finalIssues=finalizeStaticIssues(dedupeIssues(issues),lang,text,htmlInfo);
+    const parserMap={html:'HTML + AST + cross-link',js:window.acorn?'Acorn AST + deep layers':'Native parser fallback + deep layers',css:'CSS structural analyzer',py:'Python semantic heuristics',json:'JSON native parser',sql:'SQL structural + safety analyzer',ts:'TypeScript semantic heuristics',java:'Java semantic heuristics',c:'C semantic heuristics',cpp:'C++ semantic heuristics',cs:'C# semantic heuristics',go:'Go semantic heuristics',rust:'Rust semantic heuristics',php:'PHP semantic heuristics',ruby:'Ruby semantic heuristics',kotlin:'Kotlin semantic heuristics',swift:'Swift semantic heuristics'}; return {lang,issues:finalIssues,parser:parserMap[lang]||'Dedicated semantic analyzer'};
   }
 
   function runScan(){
     const text=currentText(); if(!text.trim())return;
     const hintExt=els.dropzone.dataset.detected; const result=runScanText(text,null,state.mode==='file'?hintExt:null);
     state.lastScan=result;
-    els.aiReviewBtn.disabled=false;
-    els.aiStatus.textContent='静的解析完了。AIで独立検証できます。';
     renderResults(result.issues,result.lang,result.parser);
   }
 
-  const langLabel={html:'HTML',css:'CSS',js:'JavaScript',py:'Python',json:'JSON'};
+  const langLabel={html:'HTML',css:'CSS',js:'JavaScript',py:'Python',json:'JSON',ts:'TypeScript',java:'Java',c:'C',cpp:'C++',cs:'C#',go:'Go',rust:'Rust',php:'PHP',ruby:'Ruby',sql:'SQL',kotlin:'Kotlin',swift:'Swift'};
   const severityMeta={
     CRITICAL:{icon:'circle-x'},HIGH:{icon:'circle-x'},MEDIUM:{icon:'triangle'},LOW:{icon:'info'},INFO:{icon:'info'}
   };
@@ -1960,7 +2122,7 @@
   function renderResults(issues,lang,parser){
     els.results.classList.add('show');
     const counts={CRITICAL:0,HIGH:0,MEDIUM:0,LOW:0,INFO:0}; issues.forEach(x=>counts[x.severity]++);
-    let html='<span class="sum-pill info">検査モード: '+escapeHTML(langLabel[lang]||lang)+'</span><span class="sum-pill info">解析: '+escapeHTML(parser||'')+'</span><span class="sum-pill info">層: Scope / Data Flow / Control Flow / Game State</span>';
+    let html='<span class="sum-pill info">検査モード: '+escapeHTML(langLabel[lang]||lang)+'</span><span class="sum-pill info">解析: '+escapeHTML(parser||'')+'</span><span class="sum-pill info">層: Syntax / AST / Scope / Type / Data Flow / Control Flow / DOM / CSS / Storage / Async / Concurrency / Security / Memory / Game State</span>';
     for(const sev of ['CRITICAL','HIGH','MEDIUM','LOW','INFO']) if(counts[sev]) html+='<span class="sum-pill '+(sev==='INFO'?'info':sev==='MEDIUM'?'warn':'err')+'">'+sev+' '+counts[sev]+'件</span>';
     if(!issues.length) html+='<span class="sum-pill ok">'+iconSVG('check')+' 問題なし</span>';
     els.summaryStrip.innerHTML=html;
@@ -1978,82 +2140,10 @@
       if(is.primaryId) body+='<div class="secondary-row">└ Secondary: 先行する主原因 '+escapeHTML(is.primaryId)+' の派生エラー</div>';
       body+='</div></div>'; return body;
     }).join('');
-    els.resultsBody.innerHTML='<div class="scan-note">CRITICAL/HIGH は明確な構文・実行上の問題を優先。確度スコアはScope / Data Flow / Control Flow / Game Stateなど独立した根拠が重なるほど上がります。MEDIUM/LOW はコードだけでは断定できないものを「可能性あり」として分離します。</div><div class="issue-list">'+list+'</div>';
+    els.resultsBody.innerHTML='<div class="scan-note">CRITICAL/HIGH は複数の静的根拠または明確な仕様違反を優先。確度スコアは独立した解析層の一致で上がります。MEDIUM/LOW は仕様依存・環境依存を明確に分離します。</div><div class="issue-list">'+list+'</div>';
   }
 
   // Public API + self test suite for regression testing.
-  /* ================================================================
-     AI SECOND OPINION
-     Browser never stores an API key. The bridge receives code + static
-     evidence and performs multi-pass analyst / adversary / judge review.
-  ================================================================= */
-  function buildAIPacket(){
-    const text=currentText();
-    const scan=state.lastScan || runScanText(text,null,state.mode==='file'?els.dropzone.dataset.detected:null);
-    const compactIssues=(scan.issues||[]).slice(0,200).map(i=>({
-      line:i.line,kind:i.kind,severity:i.severity,confidence:i.confidence,
-      title:i.title,desc:i.desc,snippet:i.snippet||'',evidence:(i.evidence||[]).map(e=>e.type)
-    }));
-    return {
-      version:'5.0', language:scan.lang, parser:scan.parser,
-      code:text, staticFindings:compactIssues,
-      policy:{
-        neverTreatStyleAsBug:true,
-        requireCounterexampleForPossible:false,
-        prioritizeTruePositives:true,
-        preserveSourceLineNumbers:true,
-        distinguishCertainVsPossible:true,
-        categories:['Syntax','Logic Bug','Type','DOM','HTML','CSS','Event','Async','Storage','Game State','Security','Performance']
-      }
-    };
-  }
-
-  function renderAIResult(data){
-    const old=document.getElementById('aiResultCard'); if(old) old.remove();
-    const box=document.createElement('div'); box.className='ai-card'; box.id='aiResultCard';
-    const summary=String(data.summary||data.judgment||'AIレビュー完了');
-    let html='<h3>AI検証結果</h3><div class="issue-desc">'+escapeHTML(summary)+'</div>';
-    if(Array.isArray(data.findings) && data.findings.length){
-      html+='<div class="issue-list" style="margin-top:10px">';
-      for(const f of data.findings){
-        html+='<div class="issue sev-'+String(f.severity||'MEDIUM').toLowerCase()+'"><div></div><div class="issue-line"><span class="num">'+escapeHTML(f.line??'?')+'</span>行目</div><div class="issue-body">';
-        html+='<div class="issue-meta"><span>種類: '+escapeHTML(f.kind||'AI')+'</span><span>重要度: '+escapeHTML(f.severity||'MEDIUM')+'</span><span>AI確度: '+escapeHTML(f.confidence||'POSSIBLE')+'</span></div>';
-        html+='<div class="issue-title">'+escapeHTML(f.title||'')+'</div>';
-        html+='<div class="issue-desc">'+escapeHTML(f.reason||f.desc||'')+'</div>';
-        if(f.before) html+='<div class="issue-section"><strong>修正前:</strong> <code>'+escapeHTML(f.before)+'</code></div>';
-        if(f.after) html+='<div class="issue-section"><strong>修正後候補:</strong> <code>'+escapeHTML(f.after)+'</code></div>';
-        if(f.counterexample) html+='<div class="issue-section"><strong>反証チェック:</strong> '+escapeHTML(f.counterexample)+'</div>';
-        html+='</div></div>';
-      }
-      html+='</div>';
-    }
-    if(data.rejected && data.rejected.length){ html+='<div class="issue-section" style="margin-top:10px"><strong>AIが誤検出候補として除外:</strong> '+escapeHTML(data.rejected.join(' / '))+'</div>'; }
-    if(data.stats) html+='<div class="ai-status">'+escapeHTML(JSON.stringify(data.stats))+'</div>';
-    if(data.raw && !data.findings){ html+='<pre>'+escapeHTML(data.raw)+'</pre>'; }
-    box.innerHTML=html;
-    els.resultsBody.prepend(box);
-  }
-
-  async function runAIReview(){
-    const text=currentText(); if(!text.trim())return;
-    els.aiReviewBtn.disabled=true; els.aiStatus.textContent='AI検証中… 静的解析結果を独立レビューしています。';
-    try{
-      const packet=buildAIPacket();
-      const res=await fetch(els.aiEndpoint.value.trim()||'/api/review',{
-        method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-          ...packet, model:els.aiModel.value.trim()||'gpt-5.6-sol', passes:Number(els.aiPasses.value)||2
-        })
-      });
-      const data=await res.json();
-      if(!res.ok) throw new Error(data.error||('HTTP '+res.status));
-      state.lastAI=data; renderAIResult(data);
-      els.aiStatus.textContent='AI検証完了。静的解析との突き合わせ結果を表示しています。';
-    }catch(err){
-      els.aiStatus.textContent='AI Bridgeに接続できません: '+err.message;
-    }finally{ els.aiReviewBtn.disabled=false; }
-  }
-  els.aiReviewBtn.addEventListener('click',runAIReview);
-
   function runSelfTests(){
     const tests=[]; const add=(name,should,fn)=>{const r=fn();tests.push({name,passed:should?r.ok:!r.ok,detail:r.detail||''});};
     const has=(issues,rx)=>issues.some(x=>rx.test(x.title+' '+x.desc));
@@ -2094,6 +2184,18 @@
       const ok=[/敵HP|減算処理/,/代入/,/メソッドを呼び出していません/,/ランダム/,/所持金/,/XP/,/未定義DOM/,/複数登録/,/正規表現/].every(rx=>rx.test(joined));
       return {ok,detail:joined};
     });
+    add('TypeScript null型',true,()=>{const r=runScanText('const hp: number = null;','ts');return {ok:has(r.issues,/TypeScript|型/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('Java String ==',true,()=>{const r=runScanText('String a="x"; if(a == "x"){}','java');return {ok:has(r.issues,/String|==/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('C unsafe strcpy',true,()=>{const r=runScanText('#include <string.h>\nstrcpy(dst, src);','c');return {ok:has(r.issues,/危険|文字列/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('C++ namespace',true,()=>{const r=runScanText('std::vector<int> a;','cpp');return {ok:r.lang==='cpp',detail:r.lang}});
+    add('C# compile signal',true,()=>{const r=runScanText('using System;\nConsole.WriteLine("x");','cs');return {ok:r.lang==='cs',detail:r.lang}});
+    add('Go goroutine',true,()=>{const r=runScanText('package main\nfunc main(){ go work() }','go');return {ok:r.lang==='go',detail:r.lang}});
+    add('Rust unwrap',true,()=>{const r=runScanText('fn main(){ let x=foo().unwrap(); }','rust');return {ok:has(r.issues,/unwrap/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('PHP secret',true,()=>{const r=runScanText('<?php $api_key = "SECRET";','php');return {ok:has(r.issues,/認証情報|ハードコード/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('Ruby eval',true,()=>{const r=runScanText('eval(user_input)','ruby');return {ok:has(r.issues,/eval/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('SQL delete without where',true,()=>{const r=runScanText('DELETE FROM users','sql');return {ok:has(r.issues,/WHEREなし/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('Kotlin !!',true,()=>{const r=runScanText('val x = user!!.name','kotlin');return {ok:has(r.issues,/非null/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('Swift try!',true,()=>{const r=runScanText('let x = try! load()','swift');return {ok:has(r.issues,/try!/),detail:r.issues.map(x=>x.title).join(',')}});
     return tests;
   }
   window.LintBench={analyze:runScanText,runSelfTests};
