@@ -675,12 +675,25 @@
   els.tabFile.addEventListener('click', () => setMode('file'));
 
   /* ---------------- 文字数カウント ---------------- */
-  els.codeInput.addEventListener('input', () => {
-    const v = els.codeInput.value;
-    const lines = v.length ? v.split('\n').length : 0;
+  function syncEditorMeta(){
+    const v = els.codeInput.value || '';
+    const lines = v.length ? v.split(/\r\n|\r|\n/).length : 0;
     els.lineCount.textContent = lines + ' 行 / ' + v.length + ' 文字';
     updateRunState();
+  }
+  let editorSyncQueued = false;
+  function queueEditorSync(){
+    if(editorSyncQueued) return;
+    editorSyncQueued = true;
+    const run = () => { editorSyncQueued = false; syncEditorMeta(); };
+    if(typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+    else setTimeout(run,0);
+  }
+  ['input','change','compositionend','paste','drop'].forEach(type => {
+    els.codeInput.addEventListener(type, queueEditorSync, {passive:true});
   });
+  els.codeInput.addEventListener('beforeinput', queueEditorSync, {passive:true});
+  syncEditorMeta();
 
   /* ---------------- ファイル読み込み ---------------- */
   function readFile(file){
@@ -2117,6 +2130,70 @@ const BOOSTERS=[
  [/\b(?:null|nil|none|undefined)\b/i,/\b(?:dereference|member|property|index|method|field)\b/i,'Runtime']
 ];
 
+// v8.0 precision packs: concrete bug patterns from orthogonal angles.
+const PRECISION_PACKS = [
+[/\b(?:x|value|result)\s*===?\s*NaN\b/,'Type','NaNを直接比較しています','NaN判定にはNumber.isNaN()等を使用してください。','HIGH'],
+[/\b(?:x|value|result)\s*!==?\s*NaN\b/,'Type','NaNの不等比較','NaNは通常の比較演算子では期待通り判定できません。','HIGH'],
+[/\bparseInt\s*\([^,\n]+\)/,'Type','parseIntの基数省略','入力に先頭0や16進表記が混ざる場合を含め、基数を明示するかNumber()を検討してください。','LOW'],
+[/\b(?:items|array|list)\s*\[\s*-1\s*\]/,'Bounds','負の配列添字','JavaScript配列の-1は最後の要素を表しません。','HIGH'],
+[/\b(?:items|array|list)\[\s*(?:length|\.length)\s*\]/,'Bounds','lengthそのものを添字に使用','最大の有効添字はlength-1です。','HIGH'],
+[/\bcatch\s*(?:\([^)]*\))?\s*\{\s*\}/,'Error Handling','空catch','例外を完全に無視しています。','MEDIUM'],
+[/\bfinally\s*\{[\s\S]{0,500}?\breturn\b/,'Control Flow','finally内return','finallyのreturnは元のreturn/throwを上書きします。','HIGH'],
+[/\bnew\s+Promise\s*\(\s*async\b/,'Async','async Promise executor','Promiseコンストラクタのexecutorをasyncにすると例外処理が分かりにくくなります。','HIGH'],
+[/\.forEach\s*\(\s*async\b/,'Async','async forEach','forEachは内部Promiseを待ちません。','HIGH'],
+[/\bPromise\.all\s*\([^)]*\.map\s*\(/,'Async','Promise.all一括実行','大量データを一度に並列実行していないか確認してください。','LOW'],
+[/\bURL\.createObjectURL\s*\(/,'Resource','ObjectURL解放確認','不要になったObject URLをrevokeObjectURLで解放できるか確認してください。','LOW'],
+[/\bnew\s+Worker\s*\(/,'Resource','Worker lifecycle','不要Workerをterminateする経路を確認してください。','LOW'],
+[/\bnew\s+AudioContext\s*\(/,'Resource','AudioContext lifecycle','不要になったAudioContextをcloseできるか確認してください。','LOW'],
+[/\bwindow\.addEventListener\s*\(\s*["']resize["']/,'Performance','resize高頻度処理','resizeのたびに重い処理を行っていないか確認してください。','LOW'],
+[/\baddEventListener\s*\(\s*["']scroll["']/,'Performance','scroll高頻度処理','scrollイベントのthrottle/debounceを検討してください。','LOW'],
+[/\baddEventListener\s*\(\s*["'](?:mousemove|pointermove)["']/,'Performance','pointer高頻度処理','高頻度イベント内の重いDOM/3D処理を確認してください。','LOW'],
+[/\bsetInterval\s*\([^,]+,\s*0\s*\)/,'Performance','0ms interval','イベントループを占有する可能性があります。','MEDIUM'],
+[/\bdocument\.write\s*\(/,'DOM','document.write使用','ロード後はページ内容を置換する危険があります。','HIGH'],
+[/\binnerHTML\s*\+=/,'DOM','innerHTML +=','DOM再構築でイベントや参照が切れる可能性があります。','MEDIUM'],
+[/\bquerySelectorAll\([^)]*\)\[0\]/,'DOM','空NodeListの直接添字','0件ならundefinedになります。','MEDIUM'],
+[/\bwindow\.open\s*\([^,]+,\s*["']_blank["']/,'Security','window.open _blank','noopener等を確認してください。','MEDIUM'],
+[/\bpostMessage\s*\([^,]+,\s*["']\*["']\s*\)/,'Security','postMessage wildcard','送信先originを*に固定しています。','HIGH'],
+[/\bnew\s+Function\s*\(/,'Security','new Function','文字列からコードを生成します。','HIGH'],
+[/\b(?:window|document)\.location(?:\.href)?\s*=\s*[A-Za-z_$][\w$]*/,'Security','動的リダイレクト','外部入力ならopen redirect経路を確認してください。','MEDIUM'],
+[/\b(?:100vw|100vh)\b/,'CSS','viewport単位の端数','モバイルviewportやscrollbarで意図しないはみ出し/高さズレが起きることがあります。','LOW'],
+[/\boverflow\s*:\s*hidden\b/,'CSS','overflow hidden','フォーカスリングやモーダル内容を切り取っていないか確認してください。','LOW'],
+[/\btabindex\s*=\s*["'][1-9][0-9]*["']/,'Accessibility','正のtabindex','キーボード操作順を壊す可能性があります。','MEDIUM'],
+[/\bdef\s+\w+\([^)]*=\s*\[\s*\]/,'Python','mutable default list','呼び出し間でlistが共有される可能性があります。','HIGH'],
+[/\bdef\s+\w+\([^)]*=\s*\{\s*\}/,'Python','mutable default dict','呼び出し間でdictが共有される可能性があります。','HIGH'],
+[/\bsubprocess\.(?:run|Popen|call|check_output)\([^\n]*shell\s*=\s*True/,'Python','shell=True','外部入力がコマンドへ流れないか確認してください。','HIGH'],
+[/\bpickle\.loads?\s*\(/,'Python','pickle deserialization','信頼できないデータの復元は危険です。','CRITICAL'],
+[/\bOptional\.get\s*\(\s*\)/,'Java','Optional.get','値がない場合例外になります。','MEDIUM'],
+[/\basync\s+void\b/,'C#','async void','呼び出し側でawaitできないため例外境界を確認してください。','HIGH'],
+[/\.Result\b|\.Wait\s*\(\s*\)/,'C#','同期的Task待機','デッドロック/スレッド枯渇を確認してください。','HIGH'],
+[/\bGo\s*\(\s*func\s*\(/,'Go','goroutine lifecycle','終了待機やcancel経路を確認してください。','LOW'],
+[/\bunsafe\b/,'Rust','unsafe boundary','unsafe内部の不変条件を確認してください。','LOW'],
+[/\b\.unwrap\s*\(\s*\)/,'Rust','unwrap panic','None/Errでpanicする可能性があります。','LOW'],
+[/\bunserialize\s*\(/,'PHP','unserialize security','信頼できない入力の復元を避けてください。','CRITICAL'],
+[/\bsend\s*\(\s*params\b/,'Ruby','dynamic send','外部入力による任意メソッド呼び出しを確認してください。','HIGH'],
+[/\bGlobalScope\./,'Kotlin','GlobalScope lifecycle','ライフサイクル外Coroutineを確認してください。','MEDIUM'],
+[/\brunBlocking\s*\{/,'Kotlin','runBlocking','UI/サーバースレッドをブロックしないか確認してください。','MEDIUM'],
+[/\btry!\b/,'Swift','try!','失敗時にクラッシュします。','HIGH'],
+[/\bas!\s+[A-Za-z_][A-Za-z0-9_<>]*/,'Swift','forced cast','型が違う場合runtime crashになります。','HIGH'],
+[/\bDispatchQueue\.main\.sync\b/,'Swift','main.sync','メインキューからのsyncでdeadlockになる可能性があります。','CRITICAL']
+];
+function checkPrecisionPacks(text,lines,issues,lang){
+  const langSpecific=new Set(['Python','Java','C#','Go','Rust','PHP','Ruby','Kotlin','Swift','CSS','HTML']);
+  for(const [rx,kind,title,desc,severity] of PRECISION_PACKS){
+    if(['Python','Java','C#','Go','Rust','PHP','Ruby','Kotlin','Swift'].includes(kind)){
+      const map={Python:'py',Java:'java','C#':'cs',Go:'go',Rust:'rust',PHP:'php',Ruby:'ruby',Kotlin:'kotlin',Swift:'swift'};
+      if(lang!==map[kind]) continue;
+    }
+    if(kind==='CSS' && lang!=='css') continue;
+    rx.lastIndex=0;
+    const m=rx.exec(text); if(!m) continue;
+    const line=lineAt(text,m.index), snippet=getLineText(lines,line);
+    if(/^\s*(?:\/\/|#|--|\/\*|\*|<!--)/.test(snippet)) continue;
+    if(issues.some(x=>x.line===line&&x.title===title)) continue;
+    pushIssue(issues,{severity,line,kind,title,desc,snippet,confidence:severity==='CRITICAL'||severity==='HIGH'?'HIGH':severity==='MEDIUM'?'MEDIUM':'LOW',tag:'v8-precision'});
+  }
+}
+
 const MASSIVE_RULE_COUNT=MASSIVE_RULES.length;
 const DEEP_PRECISION_ENGINE=true;
 function checkMassiveRules(text,lines,issues,lang){
@@ -2604,16 +2681,32 @@ function checkMassiveRules(text,lines,issues,lang){
     checkAdvancedSemantics(text,lines,issues,lang,htmlInfo);
     checkDeepPrecision(text,lines,issues,lang,htmlInfo);
     checkMassiveRules(text,lines,issues,lang);
+    checkPrecisionPacks(text,lines,issues,lang);
     // No generic cross-language bracket checker: it was the main source of JS-in-string false positives.
     const finalIssues=finalizeStaticIssues(dedupeIssues(issues),lang,text,htmlInfo);
     const parserMap={html:'HTML + AST + cross-link',js:window.acorn?'Acorn AST + deep layers':'Native parser fallback + deep layers',css:'CSS structural analyzer',py:'Python semantic heuristics',json:'JSON native parser',sql:'SQL structural + safety analyzer',ts:'TypeScript semantic heuristics',java:'Java semantic heuristics',c:'C semantic heuristics',cpp:'C++ semantic heuristics',cs:'C# semantic heuristics',go:'Go semantic heuristics',rust:'Rust semantic heuristics',php:'PHP semantic heuristics',ruby:'Ruby semantic heuristics',kotlin:'Kotlin semantic heuristics',swift:'Swift semantic heuristics'}; return {lang,issues:finalIssues,parser:parserMap[lang]||'Dedicated semantic analyzer'};
   }
 
   function runScan(){
-    const text=currentText(); if(!text.trim())return;
-    const hintExt=els.dropzone.dataset.detected; const result=runScanText(text,null,state.mode==='file'?hintExt:null);
-    state.lastScan=result;
-    renderResults(result.issues,result.lang,result.parser);
+    const text=currentText(); if(!text.trim()) return;
+    els.runBtn.disabled=true;
+    els.runMeta.textContent='解析中…';
+    const execute=()=>{
+      const hintExt=els.dropzone.dataset.detected;
+      try{
+        const result=runScanText(text,null,state.mode==='file'?hintExt:null);
+        state.lastScan=result;
+        renderResults(result.issues,result.lang,result.parser);
+        els.runMeta.textContent='解析完了: '+result.issues.length+'件';
+      }catch(err){
+        els.results.classList.add('show');
+        els.summaryStrip.innerHTML='<span class="sum-pill err">解析エラー</span>';
+        els.resultsBody.innerHTML='<div class="clean-msg">解析エンジン内部でエラーが発生しました。<pre style="text-align:left;max-width:900px;margin:14px auto;white-space:pre-wrap">'+escapeHTML(err?.stack||err?.message||String(err))+'</pre></div>';
+        els.runMeta.textContent='解析エラー';
+        console.error('[LintBench] scan error',err);
+      }finally{ updateRunState(); }
+    };
+    if(typeof requestAnimationFrame==='function') requestAnimationFrame(execute); else setTimeout(execute,0);
   }
 
   const langLabel={html:'HTML',css:'CSS',js:'JavaScript',py:'Python',json:'JSON',ts:'TypeScript',java:'Java',c:'C',cpp:'C++',cs:'C#',go:'Go',rust:'Rust',php:'PHP',ruby:'Ruby',sql:'SQL',kotlin:'Kotlin',swift:'Swift'};
@@ -2710,7 +2803,23 @@ function checkMassiveRules(text,lines,issues,lang){
     return tests;
   }
   window.LintBench={analyze:runScanText,runSelfTests,ruleCount:()=>MASSIVE_RULE_COUNT,deepPrecision:()=>DEEP_PRECISION_ENGINE};
-  try{ console.info('[LintBench] self-tests',runSelfTests()); }catch(_){ }
+  // Heavy regression tests must never block editor typing or first paint.
+  const runSelfTestsAsync = () => {
+    const runner = () => {
+      try {
+        const results = runSelfTests();
+        const failed = results.filter(x => !x.passed);
+        console.info('[LintBench] self-tests', { total: results.length, failed: failed.length, results });
+        document.documentElement.dataset.selfTests = failed.length ? 'failed' : 'passed';
+      } catch (err) {
+        console.error('[LintBench] self-tests crashed', err);
+        document.documentElement.dataset.selfTests = 'crashed';
+      }
+    };
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(runner, {timeout:1500});
+    else setTimeout(runner, 0);
+  };
+  runSelfTestsAsync();
 
   els.runBtn.addEventListener('click', runScan);
 
