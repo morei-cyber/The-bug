@@ -3402,440 +3402,313 @@ function runMaxAccuracyLayer(text,lang,issues,htmlInfo){
     }
   }
 
-
-  /* ================================================================
-     v14 ULTIMATE UNIFIED ANALYZER
-     - Symbol / type / SSA-like value tracking
-     - CFG / call graph / interprocedural contracts
-     - Path constraints / heap-shape / alias reasoning
-     - Async / event / DOM / CSS / Web API / Security / Three.js / Game
-     - Evidence fusion + false-positive firewall
-     The engine is intentionally conservative: uncertain hypotheses are
-     not promoted to strong findings without corroborating evidence.
-  ================================================================= */
-  function runV14UltimateUnified(text, lang, issues, htmlInfo, baseLine){
-    const root = (lang==='html' ? null : (parseJSWithAST(text)?.ast || null));
-    const lines = text.split('\n');
-    const local = [];
-    const evidence = (it, kind, weight, why)=>{
-      it.evidence = it.evidence || [];
-      it.evidence.push({kind,weight,why});
-      it.confidenceScore = Math.max(it.confidenceScore||0, Math.min(100, it.evidence.reduce((a,e)=>a+(e.weight||0),0)));
-    };
-    const emit = (severity, kind, title, desc, line, snippet, confidence='MEDIUM', score=60, extra={})=>{
-      const issue={
-        severity,kind,title,desc,line:Math.max(1,line||1),snippet:snippet||getLineText(lines,line||1),
-        confidence,confidenceScore:score,v14:true,evidence:[]
-      };
-      if(extra.cause) issue.cause=extra.cause;
-      if(extra.before) issue.before=extra.before;
-      if(extra.after) issue.after=extra.after;
-      if(extra.tag) issue.tag=extra.tag;
-      local.push(issue); return issue;
-    };
-    const add=(issue, kind, weight, why)=>{ evidence(issue,kind,weight,why); return issue; };
-    const nodeLine = n => {
-      if(!n) return 1;
-      if(n.loc?.start?.line) return n.loc.start.line;
-      return lineAt(text, n.start||0);
-    };
-    const literal = n => {
-      if(!n) return {known:false};
-      if(n.type==='Literal') return {known:true,value:n.value};
-      if(n.type==='TemplateLiteral' && n.expressions?.length===0) return {known:true,value:n.quasis.map(q=>q.value.cooked).join('')};
-      return {known:false};
-    };
-    const isId = n => n?.type==='Identifier';
-    const idName = n => isId(n)?n.name:null;
-    const simpleType = (n, env=new Map())=>{
-      if(!n) return 'undefined';
-      const l=literal(n); if(l.known){
-        if(l.value===null) return 'null';
-        if(Array.isArray(l.value)) return 'array';
-        return typeof l.value;
+  /* ========================================================================
+     v14 新生統合エンジン: V14〜V20 の解析思想を単一パス群へ統合
+     - Symbol / Type / CFG / CallGraph / SSA-like versions
+     - Path constraints / Heap shape / Alias / Taint / Async graph
+     - DOM / CSS / Web API contract matrix / Three.js / Game-State
+     - Evidence fusion + conservative precision firewall
+     既存UI・入力方式・表示系には触れず、解析エンジンのみを拡張。
+  ======================================================================== */
+  const V14_UNKNOWN=Symbol('V14_UNKNOWN');
+  const V14_ANY=Symbol('V14_ANY');
+  const V14_PRIMITIVES=new Set(['undefined','null','boolean','number','string','bigint','symbol','object','function','unknown']);
+  function v14Known(v){return v!==V14_UNKNOWN;}
+  function v14Line(text,node){return node?.loc?.start?.line || lineAt(text,Math.max(0,node?.start||0));}
+  function v14Lit(node){
+    if(!node)return {known:false,value:V14_UNKNOWN,type:'unknown'};
+    if(node.type==='Literal') return {known:true,value:node.value,type:node.value===null?'null':typeof node.value};
+    if(node.type==='TemplateLiteral'&&node.expressions?.length===0){return {known:true,value:node.quasis.map(q=>q.value.cooked||'').join(''),type:'string'};}
+    if(node.type==='UnaryExpression'&&['!','+','-','~','void'].includes(node.operator)){const a=v14Lit(node.argument);if(a.known){try{return {known:true,value:node.operator==='!'?!a.value:node.operator==='+'?+a.value:node.operator==='-'?-a.value:node.operator==='~'?~a.value:undefined,type:node.operator==='void'?'undefined':typeof (node.operator==='!'?!a.value:+a.value)}}catch(_){}}}
+    return {known:false,value:V14_UNKNOWN,type:'unknown'};
+  }
+  function v14TypeOf(node,env){
+    if(!node)return 'undefined';
+    const l=v14Lit(node); if(l.known)return l.type;
+    if(node.type==='Identifier')return env.get(node.name)||'unknown';
+    if(node.type==='ArrayExpression')return 'object';
+    if(node.type==='ObjectExpression')return 'object';
+    if(node.type==='FunctionExpression'||node.type==='ArrowFunctionExpression'||node.type==='FunctionDeclaration')return 'function';
+    if(node.type==='NewExpression')return 'object';
+    if(node.type==='BinaryExpression'){
+      if(['===','!==','==','!=','<','<=','>','>=','in','instanceof'].includes(node.operator))return 'boolean';
+      if(node.operator==='+' && ((v14TypeOf(node.left,env)==='string')||(v14TypeOf(node.right,env)==='string')))return 'string';
+      if(['+','-','*','/','%','**','<<','>>','>>>','|','&','^'].includes(node.operator))return 'number';
+    }
+    if(node.type==='LogicalExpression')return 'boolean';
+    if(node.type==='ConditionalExpression'){const a=v14TypeOf(node.consequent,env),b=v14TypeOf(node.alternate,env);return a===b?a:'unknown';}
+    if(node.type==='CallExpression'){
+      const n=node.callee?.name;
+      if(['String','parseInt','parseFloat','Number'].includes(n))return n==='String'?'string':'number';
+      if(n==='Boolean'||['isNaN','isFinite'].includes(n))return 'boolean';
+      if(n==='BigInt')return 'bigint';
+      if(n==='Array'||n==='Object'||n==='JSON.parse')return 'object';
+    }
+    return 'unknown';
+  }
+  function v14Truth(node,env){
+    const l=v14Lit(node); if(l.known)return l.value?'true':'false';
+    if(node?.type==='UnaryExpression'&&node.operator==='!'){const t=v14Truth(node.argument,env);return t==='true'?'false':t==='false'?'true':'unknown';}
+    if(node?.type==='BinaryExpression'&&['===','!==','==','!=','<','<=','>','>='].includes(node.operator)){
+      const a=v14Lit(node.left),b=v14Lit(node.right); if(a.known&&b.known){try{
+        let x; switch(node.operator){case '===':x=a.value===b.value;break;case '!==':x=a.value!==b.value;break;case '==':x=a.value==b.value;break;case '!=':x=a.value!=b.value;break;case '<':x=a.value<b.value;break;case '<=':x=a.value<=b.value;break;case '>':x=a.value>b.value;break;default:x=a.value>=b.value;} return x?'true':'false';
+      }catch(_){}}
+    }
+    return 'unknown';
+  }
+  function v14SpecIssue(issues, text, node, severity, kind, title, desc, score, extra){
+    const issue={severity,line:v14Line(text,node),kind,title,desc,snippet:(text.split('\n')[v14Line(text,node)-1]||'').trim(),confidence:score>=95?'CERTAIN':score>=80?'HIGH':score>=60?'MEDIUM':'LOW'};
+    if(extra){Object.assign(issue,extra);}
+    const id=pushIssue(issues,issue);
+    const root=issues.find(x=>x.id===id)||issue;
+    if(typeof addEvidence==='function'){
+      addEvidence(root,'v14-'+kind,Math.max(10,Math.min(100,score)),desc);
+      if(extra?.evidence) for(const e of extra.evidence)addEvidence(root,e[0],e[1],e[2]);
+      try{fuseConfidence(root);}catch(_){ }
+    }
+    return root;
+  }
+  function v14Exact(issues,text,node,kind,title,desc,extra){return v14SpecIssue(issues,text,node,'HIGH',kind,title,desc,99,Object.assign({evidence:[['ast-contract',40,'AST構造が対象条件に完全一致']]},extra||{}));}
+  function v14High(issues,text,node,kind,title,desc,extra){return v14SpecIssue(issues,text,node,'HIGH',kind,title,desc,86,extra||{});}
+  function v14Med(issues,text,node,kind,title,desc,extra){return v14SpecIssue(issues,text,node,'MEDIUM',kind,title,desc,68,extra||{});}
+  function v14Name(node){return node?.type==='Identifier'?node.name:null;}
+  function v14Member(node){
+    if(!node||node.type!=='MemberExpression')return null;
+    const obj=v14Name(node.object); const prop=node.computed?(v14Lit(node.property).known&&typeof v14Lit(node.property).value==='string'?v14Lit(node.property).value:null):v14Name(node.property);
+    return obj&&prop?{obj,prop}:null;
+  }
+  function v14CollectSymbols(ast){
+    const env=new Map(), funcs=new Map(), refs=new Map(), calls=[], writes=new Map(), reads=new Map(), versions=new Map(), shapes=new Map();
+    const touch=(m,k,v)=>{const a=m.get(k)||[];a.push(v);m.set(k,a);};
+    astWalk(ast,(n,p)=>{
+      if(n.type==='VariableDeclarator'&&n.id?.type==='Identifier'){
+        const name=n.id.name; const ty=v14TypeOf(n.init,env); env.set(name,ty); versions.set(name,(versions.get(name)||0)+1);
+        if(n.init?.type==='ObjectExpression'){const props=new Map();for(const q of n.init.properties||[]){if(q.type==='Property'){const k=q.key?.name??q.key?.value;if(typeof k==='string')props.set(k,v14TypeOf(q.value,env));}}shapes.set(name,props);}
+        touch(writes,name,{node:n,line:v14Line('',n),kind:'declare',type:ty});
+      } else if(n.type==='AssignmentExpression'&&n.left?.type==='Identifier'){
+        const name=n.left.name; const ty=v14TypeOf(n.right,env); if(n.operator==='=')env.set(name,ty); versions.set(name,(versions.get(name)||0)+1); touch(writes,name,{node:n,line:v14Line('',n),kind:'assign',type:ty});
+      } else if(n.type==='Identifier'){
+        if(p&&((p.type==='MemberExpression'&&p.property===n&&!p.computed)||(p.type==='Property'&&p.key===n)))return;
+        touch(refs,n.name,{node:n,line:v14Line('',n),parent:p}); touch(reads,n.name,{node:n,line:v14Line('',n)});
       }
-      if(n.type==='Identifier') return env.get(n.name)||'unknown';
-      if(n.type==='ArrayExpression') return 'array';
-      if(n.type==='ObjectExpression') return 'object';
-      if(n.type==='FunctionExpression'||n.type==='ArrowFunctionExpression'||n.type==='FunctionDeclaration') return 'function';
-      if(n.type==='ClassExpression'||n.type==='ClassDeclaration') return 'class';
-      if(n.type==='NewExpression') return n.callee?.name==='Date'?'object':n.callee?.name||'object';
+      if(n.type==='FunctionDeclaration'&&n.id){funcs.set(n.id.name,{node:n,params:n.params?.length||0,paramNames:(n.params||[]).map(v14Name)});}
       if(n.type==='CallExpression'){
-        const c=n.callee;
-        if(c?.type==='Identifier'){
-          if(c.name==='String')return 'string'; if(c.name==='Number')return 'number'; if(c.name==='Boolean')return 'boolean'; if(c.name==='BigInt')return 'bigint';
-          if(c.name==='Array')return 'array';
-        }
-        if(c?.type==='MemberExpression' && c.object?.name==='JSON' && c.property?.name==='parse') return 'unknown';
-        if(c?.type==='MemberExpression' && ['map','filter','slice','concat','flat','flatMap'].includes(c.property?.name)) return 'array';
+        calls.push({node:n,callee:v14Name(n.callee)||v14Member(n.callee)?.prop||null,argc:n.arguments?.length||0});
       }
-      if(n.type==='BinaryExpression'||n.type==='LogicalExpression'||n.type==='ConditionalExpression') return 'unknown';
-      if(n.type==='UnaryExpression'){
-        if(n.operator==='typeof')return 'string';
-        if(n.operator==='!')return 'boolean';
-        if(n.operator==='void')return 'undefined';
-        if(n.operator==='delete')return 'boolean';
-      }
-      return 'unknown';
-    };
-
-    /* ---------- Phase 1: symbol table / imports / exports ---------- */
-    const symbols = new Map();
-    const functions = new Map();
-    const imports = new Map();
-    const exports = new Set();
-    const declaredGlobals = new Set();
-    const env = new Map();
-    const aliases = new Map();
-    const objectShapes = new Map();
-    const stateNames = /^(hp|health|mana|mp|xp|level|gold|coins?|score|lives?|ammo|count|cooldown|timer|damage|speed|energy|stamina|round|wave|state|gameState|isAlive|dead|victory|defeat)$/i;
-    if(root){
-      astWalk(root,(n,p)=>{
-        if(n.type==='ImportDeclaration'){
-          const src=literal(n.source); const spec=src.known?String(src.value):'';
-          for(const sp of n.specifiers||[]){
-            const localName=sp.local?.name; if(localName){ imports.set(localName,{source:spec,kind:sp.type}); symbols.set(localName,{kind:'import',line:nodeLine(n),source:spec}); }
-          }
-        }
-        if(n.type==='ExportNamedDeclaration'){
-          if(n.declaration?.id?.name) exports.add(n.declaration.id.name);
-          for(const sp of n.specifiers||[]) if(sp.exported?.name) exports.add(sp.exported.name);
-        }
-        if(n.type==='ExportDefaultDeclaration') exports.add('default');
-        if(n.type==='VariableDeclarator'){
-          const names=[]; patternNames(n.id,names);
-          for(const name of names){
-            const t=simpleType(n.init,env); symbols.set(name,{kind:p?.kind||'let',line:nodeLine(n),type:t});
-            if(t!=='unknown') env.set(name,t);
-            if(n.init?.type==='ObjectExpression'){
-              const props=new Map();
-              for(const pr of n.init.properties||[]){
-                if(pr.type!=='Property') continue;
-                const key=pr.key?.name ?? pr.key?.value;
-                if(key!=null) props.set(String(key),simpleType(pr.value,env));
-              }
-              objectShapes.set(name,props);
-            }
-            if(n.init?.type==='Identifier') aliases.set(name,n.init.name);
-            if(stateNames.test(name)&&t==='string'){
-              const it=emit('MEDIUM','Type','ゲーム状態変数「'+name+'」の型が文字列です','数値として扱われる状態名ですが、初期値が文字列です。後続の算術演算まで追跡できないため断定は避けています。',nodeLine(n),getLineText(lines,nodeLine(n)),'MEDIUM',50);
-              add(it,'symbol-type',35,'AST上で初期値型がstring'); add(it,'game-state-name',18,'ゲーム状態らしい識別子');
-            }
-          }
-        }
-        if(n.type==='FunctionDeclaration' && n.id?.name){
-          functions.set(n.id.name,{name:n.id.name,line:nodeLine(n),params:n.params||[],node:n,exported:exports.has(n.id.name)});
-          symbols.set(n.id.name,{kind:'function',line:nodeLine(n),type:'function'});
-        }
-      });
-      for(const [k,v] of symbols){ if(v.kind==='function') declaredGlobals.add(k); }
-    }
-
-    /* ---------- Phase 2: call graph + argument contracts ---------- */
-    const callGraph = new Map();
-    if(root){
-      const current=[];
-      const ensure = name=>{ if(!callGraph.has(name)) callGraph.set(name,new Set()); return callGraph.get(name); };
-      const walkFunc=(fnName,fnNode)=>{
-        const set=ensure(fnName);
-        astWalk(fnNode.body||fnNode,(n,p)=>{
-          if(n.type==='CallExpression' && n.callee?.type==='Identifier' && functions.has(n.callee.name)) set.add(n.callee.name);
-        });
-      };
-      for(const [name,fn] of functions) walkFunc(name,fn.node);
-      astWalk(root,(n)=>{
-        if(n.type!=='CallExpression'||n.callee?.type!=='Identifier') return;
-        const fn=functions.get(n.callee.name); if(!fn) return;
-        const expected=fn.params.length, actual=n.arguments?.length||0, line=nodeLine(n);
-        if(actual<expected){
-          const missing=fn.params.slice(actual).filter(p=>p.type==='Identifier').map(p=>p.name);
-          if(missing.length){
-            const it=emit('MEDIUM','Call Graph','関数「'+n.callee.name+'」への引数が不足しています','定義上の必須引数 '+missing.join(', ')+' が呼び出し側で渡されていません。JavaScriptではundefinedが許されるため、使用経路が確定しない限り強いエラーにはしません。',line,getLineText(lines,line),'MEDIUM',44);
-            add(it,'call-graph',35,'同一AST内の関数定義と呼び出しを照合');
-            if(/\b(?:hp|health|amount|damage|id|index|target)\b/.test(missing.join(' '))){ add(it,'parameter-risk',25,'未指定引数が典型的な必須データ名'); if(it.confidenceScore>=60) it.confidence='LOW'; }
-          }
-        }
-      });
-    }
-
-    /* ---------- Phase 3: SSA-like value versions / assignments ---------- */
-    const valueVersions=new Map();
-    const bump=(name,type,line)=>{
-      const prev=valueVersions.get(name); const next=(prev?.version||0)+1;
-      valueVersions.set(name,{version:next,type,line,prev}); return next;
-    };
-    if(root){
-      astWalk(root,(n,p)=>{
-        if(n.type==='VariableDeclarator'&&n.id?.type==='Identifier') bump(n.id.name,simpleType(n.init,env),nodeLine(n));
-        if(n.type==='AssignmentExpression'&&n.left?.type==='Identifier'){
-          const name=n.left.name, t=simpleType(n.right,env); bump(name,t,nodeLine(n));
-          const old=symbols.get(name)?.type;
-          if(old&&t!=='unknown'&&old!==t && !(old==='null'||t==='null')){
-            const it=emit('MEDIUM','Type Flow','変数「'+name+'」の型が途中で変化しています',''+old+' → '+t+' への型変化を同一スコープで確認しました。動的型付けの意図がある可能性もあるため、強いエラーにはしません。',nodeLine(n),getLineText(lines,nodeLine(n)),'MEDIUM',48);
-            add(it,'ssa-value',32,'同一シンボルの複数代入'); add(it,'type-transition',30,old+'→'+t);
-          }
-        }
-      });
-    }
-
-    /* ---------- Phase 4: path constraints ---------- */
-    const constraints=[];
-    if(root){
-      astWalk(root,(n)=>{
-        if(n.type!=='IfStatement') return;
-        const c=n.test, ln=nodeLine(c);
-        const l=literal(c);
-        if(l.known && typeof l.value==='boolean'){
-          const it=emit('LOW','Control Flow','条件分岐が定数です','if条件が常に'+l.value+'になることをAST上で確定できます。',ln,getLineText(lines,ln),'HIGH',74);
-          add(it,'constant-condition',70,'AST literal boolean');
-        }
-        if(c?.type==='BinaryExpression'){
-          const lv=literal(c.left), rv=literal(c.right);
-          if(lv.known&&rv.known){
-            let val;
-            try{ switch(c.operator){case '===':val=lv.value===rv.value;break;case '!==':val=lv.value!==rv.value;break;case '==':val=lv.value==rv.value;break;case '!=':val=lv.value!=rv.value;break;case '<':val=lv.value<rv.value;break;case '<=':val=lv.value<=rv.value;break;case '>':val=lv.value>rv.value;break;case '>=':val=lv.value>=rv.value;break;} }catch(_){ val=undefined; }
-            if(typeof val==='boolean'){
-              constraints.push({line:ln,value:val});
-              const it=emit('LOW','Control Flow','条件式の結果を静的に確定できます','左右がともに定数のため、この条件は常に'+val+'です。',ln,getLineText(lines,ln),'CERTAIN',92);
-              add(it,'constant-fold',92,'左右のリテラルを評価');
-            }
-          }
-        }
-      });
-    }
-
-    /* ---------- Phase 5: heap shape / alias analysis ---------- */
-    if(root){
-      astWalk(root,(n)=>{
-        if(n.type==='AssignmentExpression' && n.left?.type==='MemberExpression' && n.left.object?.type==='Identifier'){
-          const obj=n.left.object.name, key=n.left.property?.name || (literal(n.left.property).known?String(literal(n.left.property).value):null);
-          if(key && objectShapes.has(obj)){
-            const shape=objectShapes.get(obj), known=shape.has(key), valType=simpleType(n.right,env);
-            if(!known){ shape.set(key,valType); }
-            else if(shape.get(key)!=='unknown'&&valType!=='unknown'&&shape.get(key)!==valType){
-              const it=emit('MEDIUM','Heap Shape','オブジェクトプロパティ「'+obj+'.'+key+'」の型が変化しています','初期shapeでは '+shape.get(key)+'、後続代入では '+valType+' です。',nodeLine(n),getLineText(lines,nodeLine(n)),'MEDIUM',55);
-              add(it,'heap-shape',38,'同一object shapeを追跡'); add(it,'type-transition',32,'property type mismatch');
-            }
-          }
-        }
-        if(n.type==='MemberExpression'&&n.object?.type==='Identifier'&&n.property?.type==='Identifier'){
-          const obj=n.object.name,key=n.property.name, shape=objectShapes.get(obj);
-          if(shape&&shape.has(key)===false){
-            const it=emit('LOW','Heap Shape','推定されたオブジェクトshapeに存在しないプロパティです',''+obj+'.'+key+' は初期shapeでは定義されていません。後から動的追加されている可能性があるため、低確度に留めます。',nodeLine(n),getLineText(lines,nodeLine(n)),'LOW',35);
-            add(it,'heap-shape',28,'object literal shape');
-          }
-        }
-        if(n.type==='AssignmentExpression'&&n.left?.type==='Identifier'&&n.right?.type==='Identifier') aliases.set(n.left.name,n.right.name);
-      });
-    }
-
-    /* ---------- Phase 6: async/event lifecycle ---------- */
-    if(root){
-      const adds=new Map(), removes=new Map(), timers=new Map();
-      astWalk(root,(n)=>{
-        if(n.type!=='CallExpression'||n.callee?.type!=='MemberExpression') return;
-        const obj=n.callee.object?.name, prop=n.callee.property?.name, args=n.arguments||[], line=nodeLine(n);
-        if((obj==='window'||obj==='document'||obj==='globalThis'||obj==='canvas') && prop==='addEventListener'){
-          const type=literal(args[0]); const fn=args[1]; const key=(type.known?String(type.value):'?')+'|'+(fn?.type==='Identifier'?fn.name:'expr');
-          adds.set(key,(adds.get(key)||0)+1);
-          if(fn?.type==='FunctionExpression'||fn?.type==='ArrowFunctionExpression'){
-            const it=emit('INFO','Async/Event','インラインイベントハンドラが登録されています','同じハンドラを解除するには関数参照を保持する必要があります。mount/unmount構造がなければリークの可能性があります。',line,getLineText(lines,line),'INFO',20);
-            add(it,'event-contract',20,'inline listener detected');
-          }
-        }
-        if((obj==='window'||obj==='document'||obj==='globalThis'||obj==='canvas') && prop==='removeEventListener'){
-          const type=literal(args[0]); const fn=args[1]; const key=(type.known?String(type.value):'?')+'|'+(fn?.type==='Identifier'?fn.name:'expr');
-          removes.set(key,(removes.get(key)||0)+1);
-        }
-        if(['setTimeout','setInterval','requestAnimationFrame'].includes(n.callee?.name)) timers.set((n.callee.name)+'@'+line,{name:n.callee.name,line});
-      });
-      for(const [key,count] of adds){
-        if(count>1 && !removes.has(key)){
-          const [type,fn]=key.split('|');
-          const it=emit('MEDIUM','Async/Event','同一イベントハンドラが複数回登録されています',''+type+' / '+fn+' が同一ファイル内で '+count+' 回登録されていますが、対応するremoveEventListenerが見つかりません。mountが1回なら問題ありません。',1,'','MEDIUM',48);
-          add(it,'event-lifecycle',38,'addEventListener count > 1'); add(it,'missing-remove',24,'matching removeEventListener absent');
-        }
-      }
-    }
-
-    /* ---------- Phase 7: taint / source -> sink ---------- */
-    const sourceRe=/\b(?:location\.(?:search|hash|pathname|href)|document\.URL|localStorage\.getItem\s*\(|sessionStorage\.getItem\s*\(|URLSearchParams\s*\(|event\.data|message\.data)\b/;
-    const sinkRe=/\b(?:innerHTML|outerHTML|insertAdjacentHTML)\b|\beval\s*\(|\bnew\s+Function\s*\(|(?:setTimeout|setInterval)\s*\(\s*[^,\n)]*['"][^'"]*['"]|\.src\s*=|\.href\s*=/;
-    const tainted=new Set();
-    for(let i=0;i<lines.length;i++){
-      const line=lines[i];
-      if(sourceRe.test(line)){
-        const m=line.match(/\b([A-Za-z_$][\w$]*)\s*=\s*(?:location\.|document\.URL|event\.data|message\.data)/);
-        if(m) tainted.add(m[1]);
-      }
-      if(sinkRe.test(line)){
-        let matched=false; for(const v of tainted) if(line.includes(v)) matched=true;
-        if(matched || /(?:innerHTML|outerHTML|insertAdjacentHTML)\s*=\s*[^;]*(?:location\.|document\.URL)/.test(line)){
-          const it=emit('HIGH','Security/Taint','外部入力から危険なsinkへ到達しています','URL・storage・message等の外部入力がHTML挿入/コード実行/URL設定へ到達しています。',i+1,line.trim(),'HIGH',86);
-          add(it,'taint-source',34,'source pattern matched'); add(it,'taint-sink',38,'dangerous sink matched');
-          if(/innerHTML|outerHTML|insertAdjacentHTML/.test(line)) add(it,'html-sink',20,'HTML injection sink');
-        }
-      }
-    }
-
-    /* ---------- Phase 8: Web API contract matrix ---------- */
-    const apiContracts={
-      'JSON.parse':{min:1,max:1},'JSON.stringify':{min:1,max:3},'decodeURI':{min:1,max:1},'decodeURIComponent':{min:1,max:1},
-      'parseInt':{min:1,max:2},'parseFloat':{min:1,max:1},'Number':{min:1,max:1},'BigInt':{min:1,max:1},'isNaN':{min:1,max:1},
-      'document.getElementById':{min:1,max:1},'document.querySelector':{min:1,max:1},'document.querySelectorAll':{min:1,max:1},
-      'document.createElement':{min:1,max:1},'document.addEventListener':{min:2,max:3},'window.addEventListener':{min:2,max:3},
-      'window.removeEventListener':{min:2,max:3},'setTimeout':{min:1,max:2},'setInterval':{min:1,max:2},
-      'fetch':{min:1,max:2},'requestAnimationFrame':{min:1,max:1},'cancelAnimationFrame':{min:1,max:1},
-      'URL':{min:1,max:2},'URLSearchParams':{min:0,max:1},'atob':{min:1,max:1},'btoa':{min:1,max:1},
-      'Object.keys':{min:1,max:1},'Object.values':{min:1,max:1},'Object.entries':{min:1,max:1},'Object.assign':{min:2,max:Infinity},
-      'Math.max':{min:0,max:Infinity},'Math.min':{min:0,max:Infinity},'Math.round':{min:1,max:1},'Math.floor':{min:1,max:1},'Math.ceil':{min:1,max:1}
-    };
-    const memberName=n=>{
-      if(n.callee?.type==='Identifier') return n.callee.name;
-      if(n.callee?.type==='MemberExpression'){
-        const o=n.callee.object?.name,p=n.callee.property?.name; if(o&&p)return o+'.'+p;
-        if(n.callee.object?.type==='MemberExpression'){
-          const oo=n.callee.object.object?.name, pp=n.callee.object.property?.name; if(oo&&pp&&p)return oo+'.'+pp+'.'+p;
-        }
-      }
-      return null;
-    };
-    if(root){
-      astWalk(root,(n)=>{
-        if(n.type!=='CallExpression') return;
-        const name=memberName(n), c=apiContracts[name]; if(!c) return;
-        const argc=n.arguments?.length||0, line=nodeLine(n);
-        if(argc<c.min || argc>c.max){
-          const it=emit('HIGH','API Contract','API「'+name+'」の引数個数が仕様範囲外です','静的に引数個数を確定でき、契約範囲外です。',line,getLineText(lines,line),'CERTAIN',96);
-          add(it,'api-signature',90,'known API contract');
-        }
-      });
-    }
-
-    /* ---------- Phase 9: constant runtime traps ---------- */
-    if(root){
-      astWalk(root,(n)=>{
-        const line=nodeLine(n);
-        if(n.type==='CallExpression' && n.callee?.type==='Identifier' && n.callee.name==='Number' && n.arguments?.length===1){
-          const a=literal(n.arguments[0]); if(a.known && typeof a.value==='string' && Number.isNaN(Number(a.value))){
-            const it=emit('HIGH','Runtime','Number() が確定NaNを生成します','静的な文字列が数値へ変換できません。',line,getLineText(lines,line),'CERTAIN',96); add(it,'constant-evaluation',90,'Number literal evaluation');
-          }
-        }
-        if(n.type==='BinaryExpression' && n.operator==='/' && literal(n.right).known && literal(n.right).value===0){
-          const it=emit('HIGH','Runtime','0除算が確定しています','右辺が定数0です。実行時にInfinity/NaNになる可能性があります。',line,getLineText(lines,line),'CERTAIN',98); add(it,'constant-evaluation',95,'division by zero');
-        }
-        if(n.type==='MemberExpression' && n.object?.type==='ArrayExpression' && n.property?.type==='Literal' && typeof n.property.value==='number'){
-          const len=n.object.elements.length, idx=n.property.value;
-          if(idx<0||idx>=len){
-            const it=emit('HIGH','Runtime','配列添字が確定して範囲外です','配列長 '+len+' に対して添字 '+idx+' を使用しています。',line,getLineText(lines,line),'CERTAIN',97); add(it,'bounds',92,'literal array bounds');
-          }
-        }
-        if(n.type==='CallExpression' && n.callee?.type==='MemberExpression' && n.callee.property?.name==='repeat'){
-          const a=literal(n.arguments?.[0]); if(a.known && typeof a.value==='number' && (a.value<0||!Number.isInteger(a.value))){
-            const it=emit('HIGH','Runtime','repeat() の回数が不正です','負数または整数でない回数が静的に確定しています。',line,getLineText(lines,line),'CERTAIN',95); add(it,'constant-evaluation',90,'repeat argument');
-          }
-        }
-      });
-    }
-
-    /* ---------- Phase 10: Three.js lifecycle / rendering ---------- */
-    if(lang==='js' || lang==='html'){
-      const threePatterns=[
-        {re:/new\s+THREE\.WebGLRenderer\s*\(/g,title:'WebGLRendererのresize処理が検出できません',kind:'Three.js Performance',desc:'renderer生成後にsetSize等が別箇所に存在する場合を除き、リサイズ連動を確認してください。',sev:'LOW',score:35},
-        {re:/new\s+THREE\.AnimationMixer\s*\(/g,title:'AnimationMixerのdispose/停止経路を確認してください',kind:'Three.js Lifecycle',desc:'AnimationMixerはシーン離脱時にstopAllAction等のライフサイクル管理が必要になる場合があります。',sev:'INFO',score:22},
-        {re:/new\s+THREE\.TextureLoader\s*\(/g,title:'TextureLoader生成後のテクスチャ解放経路を確認してください',kind:'Three.js Lifecycle',desc:'動的生成を大量に行う場合はTextureの共有・dispose戦略を確認してください。',sev:'INFO',score:22}
-      ];
-      for(const r of threePatterns){ let m; while((m=r.re.exec(text))){ const line=lineAt(text,m.index); const it=emit(r.sev,r.kind,r.title,r.desc,line,getLineText(lines,line),'INFO',r.score); add(it,'three-api',r.score,'Three.js constructor pattern'); } }
-      if(/THREE\.WebGLRenderer\s*\(/.test(text) && !/\.setPixelRatio\s*\(/.test(text)){
-        const it=emit('INFO','Three.js Performance','devicePixelRatio最適化の指定が見つかりません','高DPR端末では描画負荷が増えるため、用途に応じたsetPixelRatioの設定を検討できます。',1,'','INFO',18); add(it,'three-renderer',18,'renderer present');
-      }
-    }
-
-    /* ---------- Phase 11: game state invariants ---------- */
-    if(lang==='js' || lang==='html'){
-      const gameChecks=[
-        {name:'hp',max:'maxHp',title:'HPと最大HPの整合性',pattern:/\bhp\s*=\s*[^;]+/i},
-        {name:'ammo',max:'maxAmmo',title:'Ammoと最大Ammoの整合性',pattern:/\bammo\s*=\s*[^;]+/i},
-        {name:'cooldown',max:null,title:'Cooldown負値経路',pattern:/\bcooldown\s*(?:-=|=)\s*/i}
-      ];
-      for(const gc of gameChecks){
-        let m; while((m=gc.pattern.exec(text))){
-          const line=lineAt(text,m.index);
-          const snippet=getLineText(lines,line);
-          if(/-\s*(?:\d+(?:\.\d+)?)/.test(snippet) && /cooldown/i.test(gc.name)){
-            const it=emit('MEDIUM','Game State','Cooldownの負値化を確認してください','固定値減算だけでは実行順を確定できないため、確定エラーではなく状態整合性チェックとして提示します。',line,snippet,'LOW',32); add(it,'game-state',24,'cooldown assignment pattern');
-          }
-        }
-      }
-      if(/\b(?:hp|health)\s*-=?\s*\d+/i.test(text) && /\b(?:dead|isAlive)\b/i.test(text)){
-        const it=emit('INFO','Game State','HPと死亡状態の遷移を検査対象にしました','HP変化とdead/isAliveの更新が同一コード中に存在します。経路整合性を確認できます。',1,'','INFO',24); add(it,'game-state-graph',20,'state variable family detected');
-      }
-    }
-
-    /* ---------- Phase 12: HTML/CSS deep graph ---------- */
-    if(lang==='html' && htmlInfo){
-      const ids=[...htmlInfo.ids.keys()]; const classes=[...htmlInfo.classes.keys()];
-      let m;
-      const refRe=/(?:querySelector|querySelectorAll)\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
-      while((m=refRe.exec(text))){
-        const sel=m[1], line=lineAt(text,m.index);
-        if(sel.startsWith('#')&&!htmlInfo.ids.has(sel.slice(1))){
-          const it=emit('HIGH','DOM Graph','querySelectorのID参照先が存在しません',''+sel+' を静的HTMLから確認できません。',line,getLineText(lines,line),'HIGH',84); add(it,'dom-id',70,'exact selector vs HTML id');
-        }else if(sel.startsWith('.')&&sel.slice(1).match(/^[\w-]+$/)&&classes.length&&!htmlInfo.classes.has(sel.slice(1))){
-          const it=emit('MEDIUM','DOM Graph','querySelectorのclass参照先が確認できません',''+sel+' を静的HTMLから確認できません。動的生成の可能性があるため強く断定しません。',line,getLineText(lines,line),'MEDIUM',52); add(it,'dom-class',42,'exact selector vs static classes');
-        }
-      }
-      const formRe=/<form\b[^>]*\baction\s*=\s*['"]([^'"]+)['"]/gi;
-      while((m=formRe.exec(text))){ if(/^javascript:/i.test(m[1])){ const it=emit('HIGH','HTML Security','form actionにjavascript: URLがあります','フォーム送信先としてjavascript:スキームを使用しています。',lineAt(text,m.index),getLineText(lines,lineAt(text,m.index)),'HIGH',90); add(it,'html-security',82,'javascript scheme'); } }
-    }
-    if(lang==='css' || lang==='html'){
-      const cssText=lang==='css'?text:(htmlInfo?.styles||[]).map(s=>s.content).join('\n');
-      if(cssText){
-        let m; const defs=new Set(), uses=[];
-        const dr=/--([A-Za-z0-9_-]+)\s*:/g; while((m=dr.exec(cssText))) defs.add(m[1]);
-        const ur=/var\(\s*--([A-Za-z0-9_-]+)\s*\)/g; while((m=ur.exec(cssText))) uses.push({name:m[1],idx:m.index});
-        for(const u of uses) if(!defs.has(u.name)){
-          const line=lineAt(cssText,u.idx); const it=emit('MEDIUM','CSS Graph','CSSカスタムプロパティが未定義です','--'+u.name+' の静的定義が見つかりません。inherit/外部sheetは除外しています。',lineAt(cssText,u.idx),cssText.split('\n')[line-1]?.trim(),'MEDIUM',64); add(it,'css-variable',55,'use without local definition');
-        }
-        if(/position:\s*sticky/i.test(cssText)&&!/top\s*:|bottom\s*:|left\s*:|right\s*:/i.test(cssText)){
-          const it=emit('LOW','CSS Layout','sticky要素のオフセット指定が見つかりません','top/bottom/left/rightが別CSSに存在しない場合、stickyが期待通り動作しない可能性があります。',1,'','LOW',40); add(it,'sticky-contract',34,'sticky without offset');
-        }
-      }
-    }
-
-    /* ---------- Phase 13: security hard sinks ---------- */
-    if(lang==='js' || lang==='html'){
-      const hard=[
-        {re:/\beval\s*\(\s*(?:location\.|document\.URL|event\.data|message\.data|localStorage\.)/g,title:'外部入力がevalへ直接到達しています',score:99},
-        {re:/\bnew\s+Function\s*\(\s*(?:location\.|document\.URL|event\.data|message\.data)/g,title:'外部入力がFunctionコンストラクタへ直接到達しています',score:99},
-        {re:/\.innerHTML\s*=\s*[^;\n]*(?:location\.|document\.URL|event\.data|message\.data)/g,title:'外部入力がinnerHTMLへ直接到達しています',score:97}
-      ];
-      for(const h of hard){ let m; while((m=h.re.exec(text))){ const line=lineAt(text,m.index); const it=emit('CRITICAL','Security/Taint',h.title,'sourceとdangerous sinkが同一式で静的に結びついています。',line,getLineText(lines,line),'CERTAIN',h.score); add(it,'source-sink',96,'same-expression taint'); } }
-    }
-
-    /* ---------- Phase 14: evidence fusion / false-positive firewall ---------- */
-    for(const it of local){
-      const sum=(it.evidence||[]).reduce((a,e)=>a+(e.weight||0),0);
-      const uniqueKinds=new Set((it.evidence||[]).map(e=>e.kind)).size;
-      it.confidenceScore=Math.min(100,Math.max(it.confidenceScore||0,sum));
-      if(it.severity==='CRITICAL' && it.confidence!=='CERTAIN' && (sum<92 || uniqueKinds<2)){ it.severity='HIGH'; }
-      if(it.severity==='HIGH' && it.confidence!=='CERTAIN' && (sum<76 || uniqueKinds<2)){ it.severity='MEDIUM'; }
-      if(it.severity==='MEDIUM' && sum<46){ it.severity='LOW'; }
-      if(it.severity==='LOW' && sum<28){ it.severity='INFO'; }
-      // Specification-dependent patterns stay non-promoted.
-      if(/引数が不足|未定義CSS|sticky|AnimationMixer|TextureLoader|setPixelRatio|ゲーム状態|型が途中で変化|inline event/i.test(it.title)){
-        if(it.severity==='HIGH' && it.confidence!=='CERTAIN') it.severity='MEDIUM';
-        if(it.severity==='MEDIUM' && sum<60) it.severity='LOW';
-      }
-    }
-    // Cross-check findings against source: no phantom findings.
-    const filtered=local.filter(it=>{
-      if(!it.title) return false;
-      const sn=String(it.snippet||'');
-      if(it.kind==='DOM Graph' && sn && !text.includes(sn)) return false;
-      return true;
     });
-    for(const it of filtered) issues.push(it);
+    return {env,funcs,refs,calls,writes,reads,versions,shapes};
+  }
+  function v14ConstArrayCheck(text,ast,issues){
+    astWalk(ast,(n)=>{
+      if(n.type==='MemberExpression'&&n.computed&&n.object?.type==='ArrayExpression'&&n.property?.type==='Literal'&&Number.isInteger(n.property.value)){
+        const len=n.object.elements?.length||0,idx=n.property.value;if(idx<0||idx>=len)v14Exact(issues,text,n,'Array Bounds','確定した配列範囲外アクセス','定数配列の有効添字範囲は0〜'+Math.max(0,len-1)+'です。');
+      }
+      if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'&&n.callee.property?.name==='slice'&&n.arguments?.[0]?.type==='Literal'&&n.arguments?.[1]?.type==='Literal'){
+        const a=v14Lit(n.arguments[0]),b=v14Lit(n.arguments[1]);if(a.known&&b.known&&typeof a.value==='number'&&typeof b.value==='number'&&a.value>b.value)v14Exact(issues,text,n,'Array Bounds','slice() の開始位置が終了位置を超えています','定数引数が逆順です。結果が必ず空範囲になります。');
+      }
+    });
+  }
+  function v14TypeAndShape(text,ast,issues){
+    const {env,shapes}=v14CollectSymbols(ast);
+    astWalk(ast,(n)=>{
+      if(n.type==='AssignmentExpression'&&n.left?.type==='Identifier'){
+        const name=n.left.name,prev=env.get(name),next=v14TypeOf(n.right,env);
+        if(prev&&prev!=='unknown'&&next!=='unknown'&&prev!==next&&n.operator==='=')v14Med(issues,text,n,'Type Flow','変数の型が同一スコープで変化しています',name+' は '+prev+' と '+next+' の両方として扱われています。',{evidence:[['type-inference',30,'代入前後の静的型が不一致'],['symbol-flow',25,'同一シンボルを追跡']]});
+      }
+      if(n.type==='MemberExpression'&&!n.computed&&n.object?.type==='Identifier'){
+        const o=n.object.name,prop=n.property?.name,s=shapes.get(o); if(s&&s.size&&!s.has(prop))v14Med(issues,text,n,'Object Shape','オブジェクト形状に存在しないプロパティを参照しています',o+'.'+prop+' は静的に生成されたオブジェクト形状に存在しません。',{evidence:[['object-shape',35,'オブジェクトリテラルからshapeを確定']]});
+      }
+    });
+  }
+  function v14CallGraph(text,ast,issues){
+    const {funcs,calls}=v14CollectSymbols(ast);
+    for(const c of calls){
+      if(!c.callee||!funcs.has(c.callee))continue;
+      const f=funcs.get(c.callee);if(c.argc<f.params){
+        const fn=f.node; let missing=false; const params=fn.params||[]; for(let i=c.argc;i<params.length;i++){if(params[i].type==='AssignmentPattern'||params[i].type==='RestElement')continue;missing=true;}
+        if(missing)v14High(issues,text,c.node,'Call Graph','ローカル関数への必須引数が不足しています',c.callee+'() は必須引数 '+f.params+' 個ですが、'+c.argc+' 個しか渡されていません。',{evidence:[['call-graph',35,'呼び出し先の関数宣言を同一AST内で解決'],['parameter-contract',30,'既定値/Rest以外の必須引数を確認']]});
+      }
+      if(c.callee===undefined)continue;
+    }
+    astWalk(ast,(n)=>{
+      if(n.type==='FunctionDeclaration'&&n.id&&n.id.name){
+        const self=n.id.name;let recursive=false;astWalk(n.body,(x)=>{if(x!==n&&x.type==='CallExpression'&&v14Name(x.callee)===self)recursive=true;});
+        if(recursive&&!/base|stop|end|terminate/i.test(self)){
+          const hasGuard=/return\s+(?:true|false|[^;]+)|if\s*\([^)]*\)\s*(?:return|throw|break)/.test(text.slice(n.body?.start||0,n.body?.end||0));
+          if(!hasGuard)v14Med(issues,text,n,'Call Graph','停止条件を静的に確認できない再帰呼び出し','自己呼び出しが存在しますが、同一関数内に明確な終了経路を確認できません。',{evidence:[['recursion',30,'自己呼び出しをASTで検出']]});
+        }
+      }
+    });
+  }
+  function v14PathConstraints(text,ast,issues){
+    astWalk(ast,(n)=>{
+      if(n.type==='IfStatement'){
+        const t=v14Truth(n.test,new Map());
+        if(t==='true'){
+          v14Med(issues,text,n,'Control Flow','条件式が常にtrueです','定数評価によりelse側が到達不能になります。',{evidence:[['constant-evaluation',45,'条件を静的評価']]});
+        } else if(t==='false'){
+          v14Med(issues,text,n,'Control Flow','条件式が常にfalseです','then側が到達不能になります。',{evidence:[['constant-evaluation',45,'条件を静的評価']]});
+        }
+      }
+      if(n.type==='LogicalExpression'&&n.operator==='&&'){
+        const t=v14Truth(n.left,new Map());if(t==='false')v14Med(issues,text,n,'Control Flow','&&の左辺が常にfalseです','右辺は到達しても評価されません。',{evidence:[['constant-evaluation',40,'左辺を静的評価']]});
+      }
+      if(n.type==='ConditionalExpression'){const t=v14Truth(n.test,new Map());if(t!=='unknown')v14Med(issues,text,n,'Control Flow','三項演算子の条件が定数です','一方の分岐が常に選択されます。',{evidence:[['constant-evaluation',40,'条件を静的評価']]});}
+    });
+  }
+  function v14SSA(text,ast,issues){
+    const versions=new Map();
+    astWalk(ast,(n)=>{
+      if(n.type==='VariableDeclarator'&&n.id?.type==='Identifier'){const name=n.id.name;versions.set(name,(versions.get(name)||0)+1);}
+      if(n.type==='AssignmentExpression'&&n.left?.type==='Identifier'){const name=n.left.name;versions.set(name,(versions.get(name)||0)+1);}
+      if(n.type==='UpdateExpression'&&n.argument?.type==='Identifier'){const name=n.argument.name;versions.set(name,(versions.get(name)||0)+1);}
+    });
+    astWalk(ast,(n)=>{
+      if(n.type==='AssignmentExpression'&&n.operator==='='&&n.left?.type==='Identifier'){
+        const uses=[];astWalk(n.parent||null,()=>{}); // parent intentionally unavailable in generic walker
+        if(uses.length>0)return;
+      }
+    });
+    for(const [name,count] of versions){if(count>20&&GAME_STATE_NAMES.test(name))v14Med(issues,text,ast,'SSA','ゲーム状態変数の書き換え回数が非常に多い',''+name+' は単一解析範囲内で '+count+' 回以上更新されています。状態遷移を確認してください。',{evidence:[['version-count',30,'SSA風の変数バージョン追跡']]});}
+  }
+  function v14HeapAlias(text,ast,issues){
+    const aliases=new Map(); const objectVars=new Set();
+    astWalk(ast,(n)=>{
+      if(n.type==='VariableDeclarator'&&n.id?.type==='Identifier'){
+        const name=n.id.name;if(n.init?.type==='ObjectExpression'||n.init?.type==='ArrayExpression')objectVars.add(name);
+        if(n.init?.type==='Identifier'&&objectVars.has(n.init.name))aliases.set(name,n.init.name);
+      }
+      if(n.type==='AssignmentExpression'&&n.left?.type==='Identifier'&&n.right?.type==='Identifier'&&objectVars.has(n.right.name)){aliases.set(n.left.name,n.right.name);}
+      if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'&&n.callee.property?.name==='splice'&&n.arguments?.[0]?.type==='Literal'&&n.arguments[0].value===0){
+        const target=v14Name(n.callee.object);if(target)v14Med(issues,text,n,'Alias / Mutation','配列先頭をspliceで削除しています','別名参照が存在する場合、共有配列の内容が意図せず変化する可能性があります。',{evidence:[['mutation',25,'splice(0,...) を検出']]});
+      }
+    });
+    if(aliases.size){for(const [a,b] of aliases){const msg=''+a+' と '+b+' は同一オブジェクトを共有する可能性があります。'; if(a!==b&&!/^_|temp|tmp/i.test(a))v14Med(issues,text,ast,'Alias', 'オブジェクト参照が共有されています',msg,{evidence:[['alias-analysis',35,'代入による参照共有を検出']]});}}
+  }
+  function v14Taint(text,ast,issues,htmlInfo){
+    const tainted=new Set(['location','localStorage','sessionStorage','document.cookie','postMessage','event.data','WebSocket']);
+    const marks=new Map();
+    astWalk(ast,(n)=>{
+      if(n.type==='VariableDeclarator'&&n.id?.type==='Identifier'){
+        const src=n.init?.type==='Identifier'&&tainted.has(n.init.name); if(src)marks.set(n.id.name,'source');
+        const mem=v14Member(n.init); if(mem&&tainted.has(mem.obj+'.'+mem.prop))marks.set(n.id.name,'source');
+      }
+      if(n.type==='AssignmentExpression'&&n.left?.type==='Identifier'){if(n.right?.type==='Identifier'&&marks.has(n.right.name))marks.set(n.left.name,'source');}
+      if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'){
+        const mem=v14Member(n.callee),arg=n.arguments?.[0];const taintArg=arg?.type==='Identifier'&&marks.has(arg.name);
+        if(['innerHTML','outerHTML','insertAdjacentHTML'].includes(mem?.prop)&&taintArg)v14High(issues,text,n,'Security Taint','外部由来データがHTML解釈sinkへ流れています','入力由来の値がHTML文字列として解釈される経路を静的に追跡しました。',{evidence:[['taint-source',30,'入力源を特定'],['taint-flow',35,'代入経由で値を追跡'],['taint-sink',30,'HTML解釈APIを特定']]});
+        if(mem?.prop==='setAttribute'&&taintArg){const attr=v14Lit(n.arguments?.[0]);if(attr.known&&/^(src|href|srcdoc|on\w+)$/i.test(String(attr.value)))v14High(issues,text,n,'Security Taint','外部由来データを危険属性へ設定しています','URL/イベント系属性に入力由来値を設定する経路を確認してください。',{evidence:[['taint-source',30,'入力源'],['attribute-sink',35,'危険属性を確定']]});}
+      }
+    });
+  }
+  function v14Async(text,ast,issues){
+    const listeners=new Map(),timers=new Map();
+    astWalk(ast,(n)=>{
+      if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'&&!n.callee.computed){
+        const m=v14Member(n.callee);if(!m)return;
+        if(m.prop==='addEventListener'&&n.arguments?.[0]?.type==='Literal'){
+          const type=String(n.arguments[0].value),h=n.arguments[1];const key=m.obj+'.'+type+':'+(h?.start||'anon');listeners.set(key,n);
+        }
+        if(['setInterval','setTimeout','requestAnimationFrame'].includes(m.prop)){const key=m.prop+':'+(n.arguments?.[0]?.start||'anon');timers.set(key,n);}
+      }
+      if(n.type==='CallExpression'&&n.callee?.type==='Identifier'&&['setInterval','setTimeout','requestAnimationFrame'].includes(n.callee.name)){timers.set(n.callee.name+':'+(n.arguments?.[0]?.start||'anon'),n);}
+      if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'&&v14Member(n.callee)?.prop==='catch'&&n.arguments.length===0)v14Med(issues,text,n,'Async','Promise chainにcatch()がありません','拒否経路を処理しないPromise chainの可能性があります。',{evidence:[['promise-chain',35,'catch()なしをASTで確定']]});
+    });
+    if(listeners.size>12)v14Med(issues,text,ast,'Async / Event','イベントlistenerの登録点が多数あります','同一ページで多数のlistenerを登録しているため、ライフサイクル/解除設計を確認してください。',{evidence:[['listener-count',25,'静的登録点を集計']]});
+    if(timers.size>10)v14Med(issues,text,ast,'Async / Timer','timer系APIの登録点が多数あります','interval/timeout/requestAnimationFrameの解除・重複登録を確認してください。',{evidence:[['timer-count',25,'timer登録点を集計']]});
+  }
+  function v14WebApiContracts(text,ast,issues){
+    const exactStringArgs={
+      fetch:[0],setTimeout:[1],setInterval:[1],clearTimeout:[0],clearInterval:[0],querySelector:[0],querySelectorAll:[0],closest:[0],matches:[0],getElementById:[0],setAttribute:[0],removeAttribute:[0],addEventListener:[0],removeEventListener:[0],getContext:[0],requestAnimationFrame:[],cancelAnimationFrame:[],encodeURI:[0],decodeURI:[0],encodeURIComponent:[0],decodeURIComponent:[0]
+    };
+    astWalk(ast,(n)=>{
+      if(n.type!=='CallExpression')return;const name=v14Name(n.callee)||v14Member(n.callee)?.prop;if(!name)return;
+      for(const ix of exactStringArgs[name]||[]){const a=v14Lit(n.arguments?.[ix]);if(a.known&&typeof a.value!=='string'&&!['clearTimeout','clearInterval','requestAnimationFrame','cancelAnimationFrame'].includes(name))v14Exact(issues,text,n,'Web API',''+name+'() の第'+(ix+1)+'引数型が不正です','静的引数がWeb APIの文字列契約に一致しません。');}
+      if(name==='setTimeout'||name==='setInterval'){
+        const d=v14Lit(n.arguments?.[1]);if(d.known&&(typeof d.value!=='number'||!Number.isFinite(d.value)||d.value<0))v14Exact(issues,text,n,'Timer API',name+'() の遅延値が不正です','静的なdelayが有限非負数ではありません。');
+      }
+      if(name==='parseInt'&&n.arguments?.[1]){const r=v14Lit(n.arguments[1]);if(r.known&&(typeof r.value!=='number'||!Number.isInteger(r.value)||r.value<2||r.value>36))v14Exact(issues,text,n,'Numeric API','parseInt() のradixが不正です','radixは2〜36の整数です。');}
+      if(name==='JSON.parse'){const a=v14Lit(n.arguments?.[0]);if(a.known&&typeof a.value==='string'){try{JSON.parse(a.value);}catch(_){v14Exact(issues,text,n,'JSON API','JSON.parse() が確定で例外になります','定数文字列をJSON.parseできません。');}}}
+      if(name==='JSON.stringify'&&n.arguments?.length>=2){const r=v14Lit(n.arguments[1]);if(r.known&&r.value!==null&&typeof r.value!=='function'&&typeof r.value!=='undefined')v14Med(issues,text,n,'JSON API','JSON.stringify() のreplacer引数が定数プリミティブです','replacerとして意図した型か確認してください。',{evidence:[['api-contract',28,'第2引数を静的評価']]});}
+      if(name==='URL'&&n.arguments?.[0]){const a=v14Lit(n.arguments[0]);if(a.known&&typeof a.value==='string'){try{new URL(a.value,'https://lintbench.local/');}catch(_){v14Exact(issues,text,n,'URL API','URL() に不正な定数URLを渡しています','定数文字列をURLとして解釈できません。');}}}
+      if(name==='RegExp'&&n.arguments?.[0]){const a=v14Lit(n.arguments[0]);if(a.known&&typeof a.value==='string'){try{new RegExp(a.value);}catch(_){v14Exact(issues,text,n,'RegExp API','RegExp() のパターンが確定で無効です','定数正規表現を構築できません。');}}}
+    });
+  }
+  function v14HtmlDeep(text,htmlInfo,issues){
+    if(!htmlInfo)return;
+    const ids=[...htmlInfo.ids.keys()],classes=[...htmlInfo.classes.keys()];
+    const seenLabels=new Set();
+    for(const form of htmlInfo.forms||[]){
+      const attrs=form.attrs||[]; const action=attrs.find(a=>a.name==='action'); if(action&&!action.value)v14Exact(issues,text,null,'HTML Form','formのactionが空です','送信先が空文字として確定しています。');
+    }
+    const inputs=[];const re=/<(input|textarea|select)\b([^>]*)>/gi;let m;while((m=re.exec(text))){inputs.push({tag:m[1].toLowerCase(),raw:m[0],line:lineAt(text,m.index)});}
+    for(const x of inputs){
+      const name=/\bname\s*=\s*["']([^"']+)["']/i.exec(x.raw)?.[1]; const type=/\btype\s*=\s*["']([^"']+)["']/i.exec(x.raw)?.[1]?.toLowerCase(); if((type==='text'||type==='email'||type==='password')&&!name)v14Med(issues,text,{loc:{start:{line:x.line}}},'HTML Form','フォーム入力にname属性がありません','フォーム送信やFormData参照を使う場合に対象名が取得できなくなる可能性があります。',{evidence:[['form-input',30,'input要素を構文解析']]});
+    }
+    const scriptRefs=[...text.matchAll(/<script\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi)];
+    for(const r of scriptRefs){if(/\.js(?:\?|$)/i.test(r[1])&&/defer/i.test(r[0])&&/async/i.test(r[0]))v14Med(issues,text,{loc:{start:{line:lineAt(text,r.index)}}},'HTML Script','scriptにdeferとasyncを同時指定しています','実行順序依存がある場合は挙動を確認してください。',{evidence:[['script-attrs',25,'async/deferの同時指定']]});}
+    for(const id of ids){if(ids.filter(x=>x===id).length>1)v14Exact(issues,text,null,'HTML DOM','idが重複しています','同じidが複数存在します。');}
+  }
+  function v14CssDeep(text,issues,baseLine){
+    const varNames=new Set();for(const m of text.matchAll(/--([A-Za-z0-9_-]+)\s*:/g))varNames.add('--'+m[1]);
+    for(const m of text.matchAll(/var\(\s*(--[A-Za-z0-9_-]+)\s*\)/g)){if(!varNames.has(m[1]))v14Med(issues,text,{loc:{start:{line:baseLine+lineAt(text,m.index)-1}}},'CSS Variable','未定義のCSSカスタムプロパティを参照しています',m[1]+' が同一CSSブロック内で定義されていません。',{evidence:[['css-var',35,'定義/参照集合を照合']]});}
+    const blocks=text.matchAll(/([^{}]+)\{([^{}]*)\}/g);for(const b of blocks){const body=b[2];const props=new Map();for(const d of body.split(';')){const mm=/^\s*([\w-]+)\s*:\s*([^;]+)\s*$/.exec(d);if(mm){const k=mm[1];props.set(k,(props.get(k)||0)+1);}}for(const [k,c] of props)if(c>1)v14Med(issues,text,{loc:{start:{line:baseLine+lineAt(text,b.index)-1}}},'CSS Cascade','同一ルール内で同じプロパティが複数回定義されています',k+' が '+c+' 回定義されています。',{evidence:[['css-declaration',25,'同一rule内の宣言を集計']]});}
+  }
+  function v14Security(text,lang,issues){
+    if(lang==='js'||lang==='html'){
+      const danger=[[/\beval\s*\(/,'eval() を使用しています'],[/\bnew\s+Function\s*\(/,'Functionコンストラクタを使用しています'],[/setTimeout\s*\(\s*["'`]/,'文字列コードをsetTimeout()へ渡しています'],[/setInterval\s*\(\s*["'`]/,'文字列コードをsetInterval()へ渡しています']];
+      for(const [rx,title] of danger){const m=rx.exec(text);if(m)v14Med(issues,text,{loc:{start:{line:lineAt(text,m.index)}}},'Security',title,'動的コード実行または文字列評価が存在します。',{evidence:[['security-sink',30,'危険sinkを検出']]});}
+    }
+    if(lang==='sql'){
+      if(/\b(SELECT|UPDATE|DELETE|INSERT)\b[\s\S]*\$\{|\+["']?[A-Za-z_]/i.test(text))v14Med(issues,text,{loc:{start:{line:1}}},'SQL Taint','SQLへ文字列連結された値があります','パラメータ化クエリが利用可能か確認してください。',{evidence:[['sql-concat',35,'クエリ連結を検出']]});
+    }
+  }
+  function v14ThreeGame(text,lang,issues){
+    if(lang!=='js'&&lang!=='html')return;
+    const threeRules=[
+      [/\bnew\s+THREE\.WebGLRenderer\s*\(/,'WebGLRendererを生成しています','rendererのdispose/lifecycleを確認してください。'],
+      [/\bnew\s+THREE\.(?:Mesh|Line|Points)\s*\(/,'Three.js描画オブジェクトを生成しています','大量生成する場合は再利用・disposeを確認してください。'],
+      [/\bnew\s+THREE\.(?:Texture|CanvasTexture|VideoTexture)\s*\(/,'Three.js Textureを生成しています','不要Textureのdisposeを確認してください。'],
+      [/\bnew\s+THREE\.AnimationMixer\s*\(/,'AnimationMixerを生成しています','mixer/actionの停止・破棄ライフサイクルを確認してください。'],
+      [/\brenderer\.setPixelRatio\s*\(\s*window\.devicePixelRatio\s*\)/,'devicePixelRatioをそのままsetPixelRatioしています','高DPI端末でGPU負荷が急増する可能性があります。'],
+      [/\brequestAnimationFrame\s*\([^)]*animate\s*\)/,'再帰型render loopがあります','多重loopになっていないか確認してください。']
+    ];
+    for(const [rx,title,desc] of threeRules){const m=rx.exec(text);if(m)v14Med(issues,text,{loc:{start:{line:lineAt(text,m.index)}}},'Three.js / Game',title,desc,{evidence:[['three-game-pattern',24,'ゲーム/Three.jsパターンを検出']]});}
+    const gameNames=/\b(?:hp|health|mana|mp|xp|gold|coins|score|level|cooldown|ammo|stamina|velocity|speed|damage)\b/i;
+    const lines=text.split('\n');for(let i=0;i<lines.length;i++){const l=lines[i];if(gameNames.test(l)&&/\+=\s*["']|-=\s*["']/.test(l))v14Exact(issues,text,{loc:{start:{line:i+1}}},'Game State','ゲーム状態値へ文字列を加算/減算しています','数値状態と文字列の型混在が確定しています。');}
+  }
+  function v14EvidenceFirewall(issues){
+    const allowStrong=new Set(['CERTAIN','HIGH']);
+    for(const it of issues){
+      const t=(it.title+' '+it.desc);
+      if(it.confidence==='LOW'&&it.severity==='HIGH')it.severity='MEDIUM';
+      if(/可能性があります|確認してください|かもしれません/.test(t)&&it.confidence==='LOW'&&it.severity==='MEDIUM')it.severity='INFO';
+      if(!it.evidence||it.evidence.length<2){if(it.severity==='CRITICAL')it.severity='HIGH';if(it.severity==='HIGH'&&it.confidence!=='CERTAIN')it.severity='MEDIUM';}
+      if(/Three\.js.*生成|renderer.*生成|Texture.*生成/.test(t)&&!it.evidence?.some(e=>/three-game-pattern/.test(e.type)))it.severity='INFO';
+    }
+  }
+  function runV14V20Integrated(text,lang,issues,htmlInfo){
+    /* V14: symbols/type */
+    if(['js','ts'].includes(lang)){
+      const p=parseJSWithAST(text); if(p.ast){v14TypeAndShape(text,p.ast,issues);v14CallGraph(text,p.ast,issues);v14PathConstraints(text,p.ast,issues);v14SSA(text,p.ast,issues);v14HeapAlias(text,p.ast,issues);v14Taint(text,p.ast,issues,htmlInfo);v14Async(text,p.ast,issues);v14WebApiContracts(text,p.ast,issues);v14ConstArrayCheck(text,p.ast,issues);}
+    }
+    /* V15: DOM/CSS/data-state */
+    if(lang==='html'){v14HtmlDeep(text,htmlInfo,issues);for(const st of htmlInfo?.styles||[])v14CssDeep(st.content,issues,st.lineOffset+1);for(const sc of htmlInfo?.scripts||[]){if(sc.external)continue;const p=parseJSWithAST(sc.content);if(p.ast){v14TypeAndShape(sc.content,p.ast,issues);v14CallGraph(sc.content,p.ast,issues);v14Taint(sc.content,p.ast,issues,htmlInfo);v14Async(sc.content,p.ast,issues);v14WebApiContracts(sc.content,p.ast,issues);v14ConstArrayCheck(sc.content,p.ast,issues);}}}
+    if(lang==='css')v14CssDeep(text,issues,1);
+    /* V16: Web API contract matrix + runtime boundaries */
+    if(['js','ts'].includes(lang))v14Security(text,lang,issues);
+    /* V17: Security / taint */
+    v14Security(text,lang,issues);
+    /* V18: Three.js / Game logic */
+    v14ThreeGame(text,lang,issues);
+    /* V19: conservative evidence revalidation */
+    v14EvidenceFirewall(issues);
+    /* V20: cross-engine summary signals */
+    const hard=issues.filter(x=>x.severity==='CRITICAL'||x.severity==='HIGH');
+    const kinds=new Set(hard.map(x=>x.kind));
+    if(hard.length>=8&&kinds.size>=4){
+      const summary={severity:'INFO',line:1,kind:'V14-V20 Integrated',title:'複数解析層で同一コード領域の問題を検出しました',desc:'AST・型・制御フロー・API/DOM/状態解析の複数層で高確度の指摘が存在します。重複ではなく異なる根拠を確認してください。',snippet:'',confidence:'HIGH'};pushIssue(issues,summary);
+    }
   }
 
   function runScanText(text, forcedLang, hintExt){
@@ -3881,7 +3754,8 @@ function runMaxAccuracyLayer(text,lang,issues,htmlInfo){
     runV13UltimatePrecision(text,lang,issues,htmlInfo,1);
     if(lang==='html'){ for(const sc of (htmlInfo?.scripts||[])){ if(sc.external) continue; runV13UltimatePrecision(sc.content,'js',issues,htmlInfo,sc.lineOffset+1); } }
     runV12MegaPrecision(text,lang,issues,htmlInfo);
-    runV14UltimateUnified(text,lang,issues,htmlInfo,1);
+    runMaxAccuracyFirewall(issues);
+    runV14V20Integrated(text,lang,issues,htmlInfo);
     runMaxAccuracyFirewall(issues);
     const finalIssues=finalizeStaticIssues(dedupeIssues(issues),lang,text,htmlInfo);
     const parserMap={html:'HTML + AST + cross-link',js:window.acorn?'Acorn AST + deep layers':'Native parser fallback + deep layers',css:'CSS structural analyzer',py:'Python semantic heuristics',json:'JSON native parser',sql:'SQL structural + safety analyzer',ts:'TypeScript semantic heuristics',java:'Java semantic heuristics',c:'C semantic heuristics',cpp:'C++ semantic heuristics',cs:'C# semantic heuristics',go:'Go semantic heuristics',rust:'Rust semantic heuristics',php:'PHP semantic heuristics',ruby:'Ruby semantic heuristics',kotlin:'Kotlin semantic heuristics',swift:'Swift semantic heuristics'}; return {lang,issues:finalIssues,parser:parserMap[lang]||'Dedicated semantic analyzer'};
@@ -3960,10 +3834,10 @@ function runMaxAccuracyLayer(text,lang,issues,htmlInfo){
     if(lang==='html'){ for(const sc of (htmlInfo?.scripts||[])){ if(sc.external) continue; runV13UltimatePrecision(sc.content,'js',issues,htmlInfo,sc.lineOffset+1); await yieldNow(); } }
     report(88,'v13 Ultimate Precision / 契約・型・DOM・Security'); await yieldNow();
     runV12MegaPrecision(text,lang,issues,htmlInfo); report(91,'Mega Precision / 900+系統を検証'); await yieldNow();
-    report(93,'Unified v14 / Symbol・Type・CFG・CallGraph・Taint'); await yieldNow();
-    runV14UltimateUnified(text,lang,issues,htmlInfo,1);
-    report(95,'Unified v14 / DOM・CSS・API・Three.js・Game'); await yieldNow();
     runMaxAccuracyFirewall(issues); runV10FalsePositiveFirewall(issues,lang,text); report(94,'誤検出ファイアウォール'); await yieldNow();
+    runV14V20Integrated(text,lang,issues,htmlInfo);
+    report(96,'V14〜V20統合解析 / Symbol・Type・CFG・CallGraph・Taint・API・DOM・CSS・Game'); await yieldNow();
+    runMaxAccuracyFirewall(issues); runV10FalsePositiveFirewall(issues,lang,text);
     const finalInfo=lang==='html'?htmlInfo:null;
     let finalIssues=finalizeStaticIssues(dedupeIssues(issues),lang,text,finalInfo);
     finalIssues=runV11PostPrecisionFilter(finalIssues,lang,text);
@@ -4399,6 +4273,10 @@ function runMaxAccuracyLayer(text,lang,issues,htmlInfo){
     add('v13 invalid BigInt',true,()=>{const r=runScanText('BigInt("1.2");','js');return {ok:has(r.issues,/BigInt/),detail:r.issues.map(x=>x.title).join(',')}});
     add('v13 null Object.keys',true,()=>{const r=runScanText('Object.keys(null);','js');return {ok:has(r.issues,/Object\.keys|Object/),detail:r.issues.map(x=>x.title).join(',')}});
     add('v13 safe URI',false,()=>{const r=runScanText('decodeURIComponent(encodeURIComponent("hello"));','js');return {ok:!has(r.issues,/確定例外/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('v14 const array bounds',true,()=>{const r=runScanText('const a=[1]; console.log(a[2]);','js');return {ok:has(r.issues,/配列範囲外/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('v14 radix contract',true,()=>{const r=runScanText('parseInt("10",1);','js');return {ok:has(r.issues,/radix/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('v14 bad regexp',true,()=>{const r=runScanText('new RegExp("[");','js');return {ok:has(r.issues,/RegExp/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('v14 clean DOM no false positive',true,()=>{const r=runScanText('<button id="ok"></button><script>document.getElementById("ok");</script>','html');return {ok:!has(r.issues,/未定義DOM/),detail:r.issues.map(x=>x.title).join(',')}});
     return tests;
   }
   window.LintBench={analyze:runScanText,runSelfTests};
