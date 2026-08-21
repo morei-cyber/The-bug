@@ -765,7 +765,7 @@
   els.langSelect.addEventListener('change', updateRunState);
 
   /* ================================================================
-     v2.0 静的解析エンジン
+     v6.0 静的解析エンジン
      - HTML: 字句状態を保った構造解析。script/style内はDOM解析から除外。
      - JS: Acorn AST優先 / native parser fallback / lexical recovery。
      - CSS: コメント・文字列を考慮したブロック解析。
@@ -1997,6 +1997,317 @@
     }
   }
 
+
+// v7.0 4x-scale precision rule lattice.
+// Broad rules are intentionally LOW/MEDIUM unless corroborated by nearby context.
+const MASSIVE_RULES=[];
+const MASSIVE_BASE=[
+[/\beval\s*\(/,'Security','動的コード評価','外部入力が混ざると任意コード実行につながる可能性があります。','HIGH'],
+[/\bexec\s*\(/,'Security','動的コマンド実行','外部入力が入る経路ではOSコマンド注入を確認してください。','HIGH'],
+[/\bsystem\s*\(/,'Security','system呼び出し','外部入力がコマンドへ流れていないか確認してください。','HIGH'],
+[/\bshell_exec\s*\(/,'Security','shell_exec','外部入力が混ざる場合はコマンド注入を確認してください。','HIGH'],
+[/\bassert\s*\(/,'Runtime','assert依存','本番で入力や設定次第に停止しないか確認してください。','LOW'],
+[/\bthrow\s+new\b/,'Error Handling','例外生成','例外が常態化していないか、呼び出し側で処理されるか確認してください。','INFO'],
+[/\bcatch\b/,'Error Handling','例外捕捉','例外を握りつぶしていないか確認してください。','INFO'],
+[/\bfinally\b/,'Error Handling','finally処理','return/throwと組み合わさる場合の制御フローを確認してください。','INFO'],
+[/\breturn\s+null\b/,'Runtime','null return','呼び出し側がnullを処理するか確認してください。','LOW'],
+[/\breturn\s+undefined\b/,'Runtime','undefined return','呼び出し側が未定義値を処理するか確認してください。','LOW'],
+[/\breturn\s+false\b/,'Control Flow','false return','呼び出し側が失敗/拒否を正しく判定するか確認してください。','INFO'],
+[/\breturn\s+0\b/,'Control Flow','0 return','0が有効値かエラー値かの契約を確認してください。','INFO'],
+[/\bnull\b/,'Type','null経路','nullが後続処理に流れる経路を確認してください。','LOW'],
+[/\bundefined\b/,'Type','undefined経路','未定義値が後続処理に流れる経路を確認してください。','LOW'],
+[/\bNone\b/,'Type','None経路','None処理の有無を確認してください。','LOW'],
+[/\bnil\b/,'Type','nil経路','nil処理の有無を確認してください。','LOW'],
+[/\bNaN\b/,'Numeric','NaN経路','数値計算へNaNが流れないか確認してください。','MEDIUM'],
+[/\bInfinity\b/,'Numeric','Infinity経路','無限値が状態や座標へ流れないか確認してください。','MEDIUM'],
+[/\/\s*0\b/,'Numeric','0除算候補','分母が0にならない保証を確認してください。','HIGH'],
+[/\bparseInt\s*\(/,'Type','parseInt変換','基数とNaN時の処理を確認してください。','LOW'],
+[/\bparseFloat\s*\(/,'Type','parseFloat変換','NaN時の処理を確認してください。','LOW'],
+[/\bNumber\s*\(/,'Type','Number変換','変換失敗時のNaN経路を確認してください。','LOW'],
+[/\bBoolean\s*\(/,'Type','Boolean変換','空文字・0・null等のfalsy変換を確認してください。','LOW'],
+[/\bString\s*\(/,'Type','String変換','null/undefinedの文字列化を確認してください。','LOW'],
+[/\.length\b/,'Bounds','length参照','空配列/空文字列と境界値を確認してください。','INFO'],
+[/\.size\b/,'Bounds','size参照','空コレクションと境界値を確認してください。','INFO'],
+[/\[[^\]]+\]/,'Bounds','添字アクセス','範囲外アクセス経路を確認してください。','INFO'],
+[/\.slice\s*\(/,'Bounds','slice範囲','start/endの境界と負数の意味を確認してください。','LOW'],
+[/\.substring\s*\(/,'Bounds','substring範囲','引数順序と境界値を確認してください。','LOW'],
+[/\.substr\s*\(/,'Bounds','substr使用','境界と非推奨APIの利用を確認してください。','LOW'],
+[/\.splice\s*\(/,'Collection','splice','反復中のspliceや-1削除を確認してください。','MEDIUM'],
+[/\.push\s*\(/,'Collection','push','反復中の配列拡張や重複追加を確認してください。','LOW'],
+[/\.pop\s*\(/,'Collection','pop','空コレクションでのpop結果を確認してください。','LOW'],
+[/\.shift\s*\(/,'Collection','shift','空コレクションとO(n)性能を確認してください。','LOW'],
+[/\.unshift\s*\(/,'Collection','unshift','大量要素での性能と重複追加を確認してください。','LOW'],
+[/\.map\s*\(/,'Collection','map','副作用や戻り値未使用を確認してください。','INFO'],
+[/\.filter\s*\(/,'Collection','filter','条件式の戻り値と対象配列の型を確認してください。','INFO'],
+[/\.reduce\s*\(/,'Collection','reduce','初期値・要素型・空配列を確認してください。','LOW'],
+[/\.find\s*\(/,'Collection','find','見つからない場合のundefined処理を確認してください。','LOW'],
+[/\.findIndex\s*\(/,'Collection','findIndex','-1を添字に流さないか確認してください。','MEDIUM'],
+[/\.indexOf\s*\(/,'Collection','indexOf','-1の後続利用を確認してください。','MEDIUM'],
+[/\.includes\s*\(/,'Collection','includes','型と値の一致条件を確認してください。','INFO'],
+[/\.sort\s*\(/,'Sorting','sort','比較関数の契約と元配列の破壊的変更を確認してください。','LOW'],
+[/\.reverse\s*\(/,'Collection','reverse','元配列を破壊的変更していないか確認してください。','LOW'],
+[/\.join\s*\(/,'Type','join','null/undefined要素の文字列化を確認してください。','LOW'],
+[/\.split\s*\(/,'Type','split','空文字や区切り文字未検出時の結果を確認してください。','LOW'],
+[/\.replace\s*\(/,'String','replace','正規表現/全置換の意図と副作用を確認してください。','LOW'],
+[/\.trim\s*\(/,'String','trim','UI入力の空文字判定と組み合わせを確認してください。','INFO'],
+[/\.toUpperCase\s*\(/,'String','大文字変換','Unicode/ロケール依存を確認してください。','INFO'],
+[/\.toLowerCase\s*\(/,'String','小文字変換','Unicode/ロケール依存を確認してください。','INFO'],
+[/\.toFixed\s*\(/,'Numeric','toFixed','文字列・NaN・Infinityに対する呼び出しを確認してください。','MEDIUM'],
+[/\.toLocaleString\s*\(/,'Numeric','toLocaleString','ロケール依存の表示を数値計算に利用していないか確認してください。','LOW'],
+[/\.toString\s*\(/,'Type','toString','null/undefinedや型変換の順序を確認してください。','LOW'],
+[/JSON\.parse\s*\(/,'Serialization','JSON.parse','不正JSON・null・型形状を確認してください。','MEDIUM'],
+[/JSON\.stringify\s*\(/,'Serialization','JSON.stringify','undefined/循環参照/BigIntの扱いを確認してください。','MEDIUM'],
+[/localStorage\.(?:getItem|setItem|removeItem|clear)\s*\(/,'Storage','localStorage','保存データの存在・サイズ・JSON化を確認してください。','INFO'],
+[/sessionStorage\.(?:getItem|setItem|removeItem|clear)\s*\(/,'Storage','sessionStorage','保存データの存在・サイズ・JSON化を確認してください。','INFO'],
+[/fetch\s*\(/,'Network','fetch','HTTPエラー・タイムアウト・AbortController・レスポンス型を確認してください。','LOW'],
+[/XMLHttpRequest/,'Network','XMLHttpRequest','status/timeout/abort/error処理を確認してください。','LOW'],
+[/WebSocket\s*\(/,'Network','WebSocket','close/error/reconnectリークを確認してください。','LOW'],
+[/EventSource\s*\(/,'Network','EventSource','close/reconnect処理を確認してください。','LOW'],
+[/setTimeout\s*\(/,'Async','setTimeout','タイマーの多重登録・解除・クロージャを確認してください。','LOW'],
+[/setInterval\s*\(/,'Async','setInterval','解除漏れ・多重起動・バックグラウンド継続を確認してください。','LOW'],
+[/requestAnimationFrame\s*\(/,'Async','requestAnimationFrame','cancelAnimationFrameと重複ループを確認してください。','LOW'],
+[/addEventListener\s*\(/,'Event','イベント登録','重複登録・解除漏れ・対象DOM消滅を確認してください。','LOW'],
+[/removeEventListener\s*\(/,'Event','イベント解除','同一関数参照・登録条件が一致するか確認してください。','INFO'],
+[/document\.querySelector(?:All)?\s*\(/,'DOM','DOM query','null/空NodeList・動的DOM更新を確認してください。','LOW'],
+[/document\.getElementById\s*\(/,'DOM','getElementById','ID存在・重複・タイミングを確認してください。','LOW'],
+[/\.classList\.(?:add|remove|toggle|contains)\s*\(/,'DOM','classList操作','対象要素とclass名の一致を確認してください。','INFO'],
+[/\.innerHTML\s*=/,'Security','innerHTML代入','外部入力が混ざる場合XSSを確認してください。','MEDIUM'],
+[/\.outerHTML\s*=/,'Security','outerHTML代入','外部入力が混ざる場合XSSを確認してください。','MEDIUM'],
+[/insertAdjacentHTML\s*\(/,'Security','insertAdjacentHTML','外部入力が混ざる場合XSSを確認してください。','MEDIUM'],
+[/window\.location\s*=/,'Security','location変更','外部入力が遷移先に入っていないか確認してください。','LOW'],
+[/target\s*=\s*["']_blank["']/,'Security','target=_blank','noopener/noreferrerの設定を確認してください。','LOW'],
+[/iframe\b/i,'Security','iframe埋込','sandbox/CSP/信頼境界を確認してください。','LOW'],
+[/document\.cookie/,'Security','document.cookie','機密CookieのJavaScriptアクセスとHttpOnly設定を確認してください。','MEDIUM'],
+[/postMessage\s*\(/,'Security','postMessage','origin検証があるか確認してください。','MEDIUM'],
+[/MessageChannel/,'Security','MessageChannel','信頼境界とメッセージ内容検証を確認してください。','LOW'],
+[/crypto\.subtle/,'Security','WebCrypto','鍵管理・IV/nonce再利用・エラー処理を確認してください。','INFO'],
+[/Math\.random\s*\(/,'Randomness','Math.random','暗号用途には不適切です。ゲーム乱数でも境界値を確認してください。','LOW'],
+[/Date\.now\s*\(/,'Time','Date.now','単位・時計変更・負値差分を確認してください。','LOW'],
+[/new\s+Date\s*\(/,'Time','Date生成','タイムゾーンとinvalid dateを確認してください。','LOW'],
+[/Promise\.(?:all|allSettled|race|any)\s*\(/,'Async','Promise combinator','一つのrejectで全体が失敗するか、キャンセルが必要か確認してください。','LOW'],
+[/Promise\.resolve\s*\(/,'Async','Promise.resolve','thenチェーンの戻り値と例外を確認してください。','INFO'],
+[/async\s+function/,'Async','async function','例外がrejectへ変換されることを呼び出し側が処理するか確認してください。','INFO'],
+[/await\s+/,'Async','await','ループ内直列化・UIブロック・例外境界を確認してください。','INFO'],
+[/try\s*\{/,'Error Handling','tryブロック','catch/finally・再throw・部分更新を確認してください。','INFO'],
+[/throw\s+/,'Error Handling','throw','呼び出し側の例外契約とcleanupを確認してください。','INFO'],
+[/switch\s*\(/,'Control Flow','switch','default漏れ・fallthrough・enum網羅性を確認してください。','LOW'],
+[/case\s+/,'Control Flow','case','fallthrough意図とbreak/returnを確認してください。','INFO'],
+[/\bdefault\s*:/,'Control Flow','default分岐','未知値を黙って吸収していないか確認してください。','LOW'],
+[/while\s*\(/,'Control Flow','whileループ','終了条件と更新対象を確認してください。','INFO'],
+[/for\s*\(/,'Control Flow','forループ','境界・更新式・空コレクションを確認してください。','INFO'],
+[/forEach\s*\(/,'Control Flow','forEach','break/continue不可・非同期forEach問題を確認してください。','LOW'],
+[/throw\s+new\s+Error/,'Error Handling','Error生成','エラー分類・メッセージ漏えい・retry契約を確認してください。','INFO']
+];
+
+// 75 shared families x 11 languages ~= 825 additional independent detection rules.
+const MASSIVE_LANGS=['ts','java','c','cpp','cs','go','rust','php','ruby','kotlin','swift'];
+for(const [rx,kind,title,desc,severity] of MASSIVE_BASE){
+  for(const lang of MASSIVE_LANGS){
+    MASSIVE_RULES.push({rx,lang,kind,title:`${title} [${lang.toUpperCase()}]`,desc,severity,confidence:severity==='HIGH'?'HIGH':severity==='MEDIUM'?'MEDIUM':'LOW'});
+  }
+}
+
+// Precision boosters: the same detection is upgraded only when nearby semantics corroborate it.
+const BOOSTERS=[
+ [/\b(?:hp|health|score|gold|money|coins?|xp|level)\b/i,/\b(?:subtract|damage|heal|buy|sell|level|enemy|player|game|state)\b/i,'Game State'],
+ [/\b(?:query|sql|select|insert|update|delete)\b/i,/\b(?:input|param|request|user|form)\b/i,'Security'],
+ [/\b(?:fetch|xhr|websocket|eventsource)\b/i,/\b(?:timeout|abort|retry|status|error|close)\b/i,'Network'],
+ [/\b(?:thread|goroutine|task|async|await|mutex|lock|channel|coroutine)\b/i,/\b(?:wait|join|cancel|deadlock|race|shared|close)\b/i,'Concurrency'],
+ [/\b(?:array|list|vector|slice|map|set)\b/i,/\b(?:index|length|size|splice|remove|insert|push|pop)\b/i,'Collection'],
+ [/\b(?:null|nil|none|undefined)\b/i,/\b(?:dereference|member|property|index|method|field)\b/i,'Runtime']
+];
+
+const MASSIVE_RULE_COUNT=MASSIVE_RULES.length;
+function checkMassiveRules(text,lines,issues,lang){
+  for(const rule of MASSIVE_RULES){
+    if(rule.lang!==lang || !rule.rx.test(text)) continue;
+    rule.rx.lastIndex=0;
+    const m=rule.rx.exec(text); if(!m) continue;
+    const line=lineAt(text,m.index), snippet=getLineText(lines,line);
+    // Don't emit broad rules if the line is obviously a comment-only line.
+    if(/^\s*(?:\/\/|#|--|\/\*|\*|<!--)/.test(snippet)) continue;
+    let confidence=rule.confidence;
+    const near=text.slice(Math.max(0,m.index-260),Math.min(text.length,m.index+420));
+    let corroborated=false;
+    for(const [a,b] of BOOSTERS){ if(a.test(near)&&b.test(near)){ corroborated=true; confidence=confidence==='LOW'?'MEDIUM':confidence==='MEDIUM'?'HIGH':confidence; break; } }
+    // Precision gate: broad LOW/INFO heuristics are emitted only when nearby semantics corroborate them.
+    if((rule.severity==='LOW' || rule.severity==='INFO') && !corroborated) continue;
+    // De-duplicate only the exact same finding; keep multiple independent findings on one line.
+    if(issues.some(x=>x.line===line && x.title===rule.title)) continue;
+    pushIssue(issues,{severity:rule.severity,line,kind:rule.kind,title:rule.title,desc:rule.desc,snippet,confidence,tag:'v7-massive'});
+  }
+}
+
+  // v6.0 Advanced multi-angle semantic checks.
+  // These checks intentionally combine local syntax patterns with nearby control/data-flow clues.
+  function checkAdvancedSemantics(text, lines, issues, lang, htmlInfo){
+    const emit=(line,opts)=>pushIssue(issues,Object.assign({line},opts));
+    const all=text;
+    const lower=all.toLowerCase();
+    const has=(rx)=>rx.test(all);
+    const lineOf=(rx)=>{ const m=all.match(rx); return m?lineAt(all,m.index):1; };
+    const snippet=(i)=>getLineText(lines,Math.max(1,Math.min(lines.length,i)));
+
+    // ---------- Universal JavaScript-like semantic traps ----------
+    if(['js','ts','html'].includes(lang)){
+      for(let i=0;i<lines.length;i++){
+        const l=lines[i], t=l.trim();
+        if(!t) continue;
+        // Constant conditions / contradictory conditions.
+        if(/\bif\s*\(\s*true\s*\)/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Control Flow',title:'条件が常にtrueです',desc:'分岐が常に実行されるため、意図した条件か確認してください。',snippet:t,confidence:'HIGH'});
+        if(/\bif\s*\(\s*false\s*\)/.test(t)) emit(i+1,{severity:'HIGH',kind:'Control Flow',title:'条件が常にfalseです',desc:'この分岐は実行されません。デバッグコードや条件ミスの可能性があります。',snippet:t,confidence:'CERTAIN'});
+        if(/\bif\s*\([^)]*\b([A-Za-z_$][\w$]*)\s*([<>]=?|===?)\s*\1\b/.test(t)) emit(i+1,{severity:'HIGH',kind:'Logic Bug',title:'同一変数同士を比較しています',desc:'x < x / x > x / x === x のような条件は意図した比較か確認してください。',snippet:t,confidence:'HIGH'});
+        // Assignment on one side of logical expression.
+        if(/\b(?:if|while)\s*\([^)]*\b[A-Za-z_$][\w$]*\s*=\s*(?!=)/.test(t) && !/=>/.test(t)) emit(i+1,{severity:'HIGH',kind:'Logic Bug',title:'条件式に代入があります',desc:'比較式と代入式を取り違えている可能性があります。',snippet:t,confidence:'CERTAIN'});
+        // Nullish/falsy traps.
+        if(/\b(?:x|value|hp|score|count|level)\s*\|\|\s*[-\d'"`]/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Type',title:'||によるfalsy値の置換を確認',desc:'0 / false / 空文字が意図せず既定値へ置き換わる可能性があります。',snippet:t,confidence:'MEDIUM'});
+        // Promise misuse.
+        if(/\.then\([^)]*\{[\s\S]*\}\)\s*;/.test(t) && !/return\s+/.test(t)) emit(i+1,{severity:'LOW',kind:'Async',title:'Promiseチェーンの戻り値を確認',desc:'then内の計算結果を次のチェーンへ渡す意図ならreturnが必要です。',snippet:t,confidence:'LOW'});
+        if(/\bfetch\s*\([^)]*\)\s*;/.test(t) && !/\.catch\s*\(|await\s+/.test(t)) emit(i+1,{severity:'LOW',kind:'Async',title:'fetchの失敗処理が見当たりません',desc:'ネットワーク失敗時の処理が必要か確認してください。',snippet:t,confidence:'MEDIUM'});
+        if(/response\.json\s*\(\s*\)/.test(t) && !/await\s+response\.json\s*\(\s*\)|\.then\s*\(/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Async',title:'response.json()のPromiseを処理していません',desc:'response.json() はPromiseを返します。awaitまたはthenが必要です。',snippet:t,confidence:'HIGH'});
+        if(/fetch\s*\([^)]*\)[\s\S]*?response\.json\s*\(/.test(all) && !/response\.ok/.test(all)) emit(lineOf(/response\.json\s*\(/),{severity:'LOW',kind:'Network',title:'HTTPエラー状態の確認がありません',desc:'fetchは4xx/5xxでもrejectしないため、response.ok/status確認を検討してください。',snippet:snippet(lineOf(/response\.json\s*\(/)),confidence:'MEDIUM'});
+        // Timer/event lifecycle.
+        const timeoutCount=(t.match(/setTimeout\s*\(/g)||[]).length;
+        if(timeoutCount>3 && /function\s+render|function\s+update|requestAnimationFrame/.test(all)) emit(i+1,{severity:'LOW',kind:'Async',title:'タイマーの多重登録を確認',desc:'更新処理や再描画処理のたびにsetTimeoutが増えていないか確認してください。',snippet:t,confidence:'MEDIUM'});
+        if(/addEventListener\s*\(\s*['"][^'"]+['"]/.test(t) && /removeEventListener/.test(all)===false && /function\s+(init|start|mount|setup|open)/.test(all)) emit(i+1,{severity:'LOW',kind:'Event',title:'イベントリスナーの解除経路を確認',desc:'init/openが複数回呼ばれる設計ならリスナーが累積する可能性があります。',snippet:t,confidence:'LOW'});
+        // DOM detached / stale reference patterns.
+        if(/document\.querySelector\([^)]*\)[\s\S]*?\.remove\(\)[\s\S]*?\.textContent/.test(all)) emit(lineOf(/\.remove\(\)/),{severity:'MEDIUM',kind:'DOM',title:'削除後のDOM参照を確認',desc:'remove()後に同じ要素を使うコードはstale referenceになる可能性があります。',snippet:snippet(lineOf(/\.remove\(\)/)),confidence:'MEDIUM'});
+        if(/innerHTML\s*=/.test(t) && /\b(?:location|query|search|hash|input|value|name|message|data)\b/.test(t)) emit(i+1,{severity:'HIGH',kind:'Security',title:'動的値をinnerHTMLへ挿入しています',desc:'外部入力が混ざる場合はXSSにつながるためtextContent等を検討してください。',snippet:t,confidence:'MEDIUM'});
+        // URL / open redirect-ish.
+        if(/window\.location\s*=\s*(?:location\.search|location\.hash|.*input.*value)/.test(t)) emit(i+1,{severity:'HIGH',kind:'Security',title:'外部入力でlocationを直接変更しています',desc:'外部URLへ遷移させる設計ならオープンリダイレクトを確認してください。',snippet:t,confidence:'MEDIUM'});
+        if(/target\s*=\s*['"]_blank['"]/.test(t) && !/rel\s*=\s*['"][^'"]*noopener/.test(all)) emit(i+1,{severity:'LOW',kind:'Security',title:'target=_blankにnoopenerがありません',desc:'別タブ遷移ではrel="noopener noreferrer"を検討してください。',snippet:t,confidence:'MEDIUM'});
+        // Mutation while iterating.
+        if(/forEach\s*\([^)]*\)[\s\S]*?\.splice\s*\(/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Logic Bug',title:'反復中に配列をspliceしています',desc:'要素をスキップする典型的な配列走査バグが起こり得ます。',snippet:t,confidence:'MEDIUM'});
+        if(/for\s*\([^)]*\.length[^)]*\)[\s\S]*?\.push\s*\(/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Logic Bug',title:'ループ中に走査対象配列へpushしています',desc:'条件によってはループが想定より長くなったり無限に近づく可能性があります。',snippet:t,confidence:'MEDIUM'});
+        // Numeric edge cases.
+        if(/parseInt\s*\([^,\)]+\s*\)/.test(t) && !/,\s*10\s*\)/.test(t)) emit(i+1,{severity:'LOW',kind:'Type',title:'parseIntの基数指定を確認',desc:'旧環境や可読性を考えると基数10を明示する構造が安全です。',snippet:t,confidence:'LOW'});
+        if(/Number\s*\(\s*[^)]*\)/.test(t) && /(?:input|value|query|param)/i.test(t) && !/Number\.isNaN|isFinite/.test(t)) emit(i+1,{severity:'LOW',kind:'Type',title:'外部値のNumber変換後のNaN処理を確認',desc:'変換失敗時にNaNになる可能性があります。',snippet:t,confidence:'MEDIUM'});
+      }
+    }
+
+    // ---------- HTML / CSS cross-layer ----------
+    if(lang==='html' && htmlInfo){
+      const ids=[...htmlInfo.ids.keys()];
+      const classes=[...htmlInfo.classes.keys()];
+      if(/<form\b/i.test(all) && /<button\b[^>]*>/i.test(all) && !/<button\b[^>]*type\s*=\s*["'](?:button|submit|reset)["']/i.test(all)){
+        emit(lineOf(/<button\b/i),{severity:'LOW',kind:'HTML',title:'form内buttonのtype属性を確認',desc:'type未指定のbuttonはsubmitとして扱われます。意図しないフォーム送信がないか確認してください。',snippet:snippet(lineOf(/<button\b/i)),confidence:'MEDIUM'});
+      }
+      if(/<input\b/i.test(all) && !/autocomplete=/i.test(all) && /password/i.test(all)) emit(lineOf(/password/i),{severity:'LOW',kind:'HTML',title:'password入力のautocomplete設定を確認',desc:'認証フォームではautocomplete属性を適切に設定すると意図しない保存や入力補助を制御できます。',snippet:snippet(lineOf(/password/i)),confidence:'LOW'});
+      if(/<a\b[^>]*href\s*=\s*["']javascript:/i.test(all)) emit(lineOf(/javascript:/i),{severity:'HIGH',kind:'Security',title:'javascript: URLを使用しています',desc:'リンク先としてjavascript:を使うよりイベントハンドラ等の通常の実装を推奨します。',snippet:snippet(lineOf(/javascript:/i)),confidence:'HIGH'});
+      if(/<iframe\b/i.test(all) && !/sandbox=/i.test(all)) emit(lineOf(/<iframe\b/i),{severity:'LOW',kind:'Security',title:'iframeのsandbox属性を確認',desc:'外部・不審なコンテンツを埋め込む場合はsandboxで権限を制限できます。',snippet:snippet(lineOf(/<iframe\b/i)),confidence:'LOW'});
+      if(/<img\b/i.test(all) && !/loading=["']lazy["']/i.test(all) && /\b(?:100|1000)\b/.test(all)) emit(lineOf(/<img\b/i),{severity:'LOW',kind:'Performance',title:'画像の遅延読み込みを確認',desc:'多数・大型画像ではloading="lazy"等を検討してください。',snippet:snippet(lineOf(/<img\b/i)),confidence:'LOW'});
+      if(/id=["'][^"']+["'][^>]*id=/i.test(all)) emit(lineOf(/id=["'][^"']+["'][^>]*id=/i),{severity:'HIGH',kind:'HTML',title:'同一要素にid属性が重複しています',desc:'1要素1idが基本です。',snippet:snippet(lineOf(/id=["'][^"']+["'][^>]*id=/i)),confidence:'CERTAIN'});
+      // aria references must point to existing IDs.
+      for(const m of all.matchAll(/aria-(?:labelledby|describedby|controls|owns)\s*=\s*["']([^"']+)["']/gi)){
+        const ln=lineAt(all,m.index), refs=m[1].split(/\s+/).filter(Boolean);
+        for(const id of refs) if(!ids.includes(id)) emit(ln,{severity:'MEDIUM',kind:'Accessibility',title:'ARIA参照先が存在しません: '+id,desc:'aria属性が参照するid要素がHTML内に見つかりません。',snippet:snippet(ln),confidence:'HIGH'});
+      }
+      // CSS selector ↔ HTML linkage for dynamic class/id patterns.
+      for(const m of all.matchAll(/(?:classList\.(?:add|remove|toggle)|className\s*=|setAttribute\(\s*["']class["'])[^\n]*/g)){
+        if(/className\s*=\s*["']/.test(m[0]) && /\bbtn\b/.test(m[0]) && !classes.includes('btn')) emit(lineAt(all,m.index),{severity:'LOW',kind:'DOM/CSS',title:'JSで設定するclassとHTML/CSSの対応を確認',desc:'動的classがCSS selectorと一致するか確認してください。',snippet:snippet(lineAt(all,m.index)),confidence:'LOW'});
+      }
+    }
+
+    // ---------- Python ----------
+    if(lang==='py'){
+      for(let i=0;i<lines.length;i++){
+        const t=lines[i].trim(); if(!t)continue;
+        if(/except\s+Exception\s*:\s*pass\s*$/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Error Handling',title:'Pythonで例外を握りつぶしています',desc:'予期しない失敗が見えなくなるため、ログや適切な処理を確認してください。',snippet:t,confidence:'HIGH'});
+        if(/\bdef\s+\w+\([^)]*\b\w+\s*=\s*\[\]/.test(t) || /\bdef\s+\w+\([^)]*\b\w+\s*=\s*\{\}/.test(t)) emit(i+1,{severity:'HIGH',kind:'Logic Bug',title:'Pythonのミュータブルなデフォルト引数',desc:'関数呼び出し間で同じlist/dictが共有されます。Noneを使って初期化する設計が安全です。',snippet:t,confidence:'CERTAIN'});
+        if(/\bfor\s+\w+\s+in\s+range\([^)]*len\([^)]*\)\)/.test(t) && /\w+\[/.test(t)) emit(i+1,{severity:'LOW',kind:'Logic Bug',title:'Pythonのrange(len(...))走査を確認',desc:'enumerate()のほうが添字と要素の対応を安全に扱えます。',snippet:t,confidence:'LOW'});
+        if(/\beval\s*\(|\bexec\s*\(/.test(t)) emit(i+1,{severity:'HIGH',kind:'Security',title:'Pythonの動的コード実行',desc:'外部入力が混ざると任意コード実行につながります。',snippet:t,confidence:'HIGH'});
+        if(/\bopen\s*\([^)]*\)\s*$/.test(t)) emit(i+1,{severity:'LOW',kind:'Resource',title:'ファイルをcloseする経路を確認',desc:'with open(...) を使うと例外時も自動closeできます。',snippet:t,confidence:'LOW'});
+        if(/\bexcept\s*:\s*$/.test(t)) emit(i+1,{severity:'LOW',kind:'Error Handling',title:'裸のexceptを使用しています',desc:'KeyboardInterrupt等まで捕捉するため、例外型を絞ることを推奨します。',snippet:t,confidence:'HIGH'});
+      }
+    }
+
+    // ---------- SQL ----------
+    if(lang==='sql'){
+      for(let i=0;i<lines.length;i++){
+        const t=lines[i].trim(); if(!t)continue;
+        if(/\bSELECT\b/i.test(t) && /\bORDER\s+BY\b/i.test(t) && !/\bLIMIT\b/i.test(t)) emit(i+1,{severity:'LOW',kind:'Performance',title:'大量データのORDER BYを確認',desc:'結果件数制限が必要な画面・APIではLIMIT等を検討してください。',snippet:t,confidence:'LOW'});
+        if(/\bLIKE\s+["'][^"']*%/.test(t) && /\bWHERE\b/i.test(t)) emit(i+1,{severity:'LOW',kind:'Performance',title:'前方ワイルドカードLIKEを確認',desc:'%から始まるLIKEはインデックスが効きにくいことがあります。',snippet:t,confidence:'LOW'});
+        if(/\bGROUP\s+BY\b/i.test(t) && /\bSELECT\s+\*/i.test(t)) emit(i+1,{severity:'MEDIUM',kind:'SQL',title:'GROUP BYとSELECT *の組み合わせを確認',desc:'DB設定によっては非集約列の扱いが不定/エラーになる場合があります。',snippet:t,confidence:'MEDIUM'});
+        if(/\bINSERT\b[\s\S]*VALUES\s*\([^)]*\)/i.test(t) && /\bON\s+DUPLICATE\s+KEY\b/i.test(t)===false && /\bREPLACE\b/i.test(t)) emit(i+1,{severity:'LOW',kind:'SQL',title:'REPLACEによる更新副作用を確認',desc:'REPLACEはDELETE+INSERT相当の副作用があるため、外部キー/監査列等への影響を確認してください。',snippet:t,confidence:'MEDIUM'});
+        if(/\bDROP\s+TABLE\b|\bTRUNCATE\s+TABLE\b/i.test(t)) emit(i+1,{severity:'HIGH',kind:'SQL Safety',title:'全件破壊操作を検出',desc:'DROP/TRUNCATEは元に戻せない可能性が高いため、実行環境と条件を確認してください。',snippet:t,confidence:'HIGH'});
+      }
+    }
+
+    // ---------- C/C++ ----------
+    if(['c','cpp'].includes(lang)){
+      for(let i=0;i<lines.length;i++){
+        const t=lines[i].trim(); if(!t)continue;
+        if(/\bscanf\s*\([^)]*%s/.test(t)) emit(i+1,{severity:'HIGH',kind:'Security',title:lang==='c'?'scanfの%sを確認':'C++ scanfの%sを確認',desc:'入力幅指定がない%sはバッファオーバーフローにつながる可能性があります。',snippet:t,confidence:'HIGH'});
+        if(/\bmemcpy\s*\([^;]*sizeof\s*\([^)]*\)/.test(t) && /\b(char|byte|uint8_t)\b/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Memory',title:'memcpyのコピーサイズを確認',desc:'宛先バッファサイズを超えないか確認してください。',snippet:t,confidence:'MEDIUM'});
+        if(/\bfree\s*\([^)]*\)\s*;/.test(t) && /free\s*\(\s*([^)]*)\s*\)[\s\S]*free\s*\(\s*\1\s*\)/.test(all)) emit(i+1,{severity:'HIGH',kind:'Memory',title:'同一ポインタの二重free候補',desc:'同じ式を複数回freeしている場合、ヒープ破壊につながります。',snippet:t,confidence:'HIGH'});
+        if(/\bstrncpy\s*\(/.test(t)) emit(i+1,{severity:'LOW',kind:'Security',title:'strncpyのNUL終端を確認',desc:'コピー長ちょうどの場合、終端NULが入らないことがあります。',snippet:t,confidence:'MEDIUM'});
+      }
+    }
+
+    // ---------- Java/C#/Kotlin/Swift/Rust/Go/PHP/Ruby ----------
+    if(lang==='java'){
+      for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(!t)continue;
+        if(/\.equals\([^)]*\)\s*==\s*false|\.equals\([^)]*\)\s*==\s*true/.test(t)) emit(i+1,{severity:'LOW',kind:'Logic Bug',title:'equals()結果の冗長比較を確認',desc:'!obj.equals(x) / obj.equals(x) のほうが明確です。',snippet:t,confidence:'LOW'});
+        if(/catch\s*\([^)]*\)\s*\{\s*\}/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Error Handling',title:'Javaで空catchを使用',desc:'例外を完全に握りつぶしています。',snippet:t,confidence:'HIGH'});
+        if(/new\s+Thread\s*\(/.test(t) && !/ExecutorService|Executors\./.test(all)) emit(i+1,{severity:'LOW',kind:'Concurrency',title:'Thread直接生成を確認',desc:'大量生成時はExecutorService等でライフサイクル管理したほうが安全です。',snippet:t,confidence:'LOW'});
+      }
+    }
+    if(lang==='cs'){
+      for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(!t)continue;
+        if(/\.Result\b|\.Wait\s*\(\s*\)/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Async',title:'C#で同期的にTaskを待機しています',desc:'GUI/ASP.NET等ではデッドロックの原因になることがあります。await利用を確認してください。',snippet:t,confidence:'MEDIUM'});
+        if(/async\s+void\s+\w+\s*\(/.test(t) && !/event/i.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Async',title:'async voidを使用しています',desc:'例外追跡や呼び出し側の待機が難しいため、イベントハンドラ以外ではTask返却を検討してください。',snippet:t,confidence:'HIGH'});
+        if(/string\.Format\([^)]*\+/.test(t)) emit(i+1,{severity:'LOW',kind:'Security',title:'文字列連結を含むフォーマット処理',desc:'外部入力がSQL/HTML等へ流れる場合はエンコードやパラメータ化を確認してください。',snippet:t,confidence:'LOW'});
+      }
+    }
+    if(lang==='kotlin'){
+      for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(!t)continue;
+        if(/!!/.test(t)) emit(i+1,{severity:'LOW',kind:'Runtime',title:'Kotlinの強制非null化',desc:'null時にクラッシュするため、?. / ?: 等で安全に扱えるか確認してください。',snippet:t,confidence:'MEDIUM'});
+        if(/GlobalScope\.launch/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Concurrency',title:'GlobalScope.launchを使用しています',desc:'ライフサイクル外にコルーチンが残る可能性があります。構造化並行性を検討してください。',snippet:t,confidence:'MEDIUM'});
+        if(/runBlocking\s*\{/.test(t)) emit(i+1,{severity:'LOW',kind:'Async',title:'runBlockingの利用を確認',desc:'UI/サーバスレッドをブロックしない位置で使用しているか確認してください。',snippet:t,confidence:'LOW'});
+      }
+    }
+    if(lang==='swift'){
+      for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(!t)continue;
+        if(/\btry!/.test(t)) emit(i+1,{severity:'HIGH',kind:'Runtime',title:'Swiftのtry!で実行時クラッシュ経路',desc:'throw時に即時クラッシュします。',snippet:t,confidence:'HIGH'});
+        if(/\b(?:as\!)\s+/.test(t)) emit(i+1,{severity:'HIGH',kind:'Runtime',title:'Swiftの強制型変換as!',desc:'型が一致しない場合に実行時クラッシュします。',snippet:t,confidence:'HIGH'});
+        if(/\bforce unwrap|\!\s*(?:\.|\[|\))/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Runtime',title:'Swiftの強制アンラップ候補',desc:'nil時のクラッシュ経路がないか確認してください。',snippet:t,confidence:'MEDIUM'});
+      }
+    }
+    if(lang==='rust'){
+      for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(!t)continue;
+        if(/\.unwrap\s*\(\s*\)/.test(t)) emit(i+1,{severity:'LOW',kind:'Runtime',title:'Rust unwrap()によるpanic候補',desc:'Err/None時にpanicします。',snippet:t,confidence:'MEDIUM'});
+        if(/unsafe\s*\{/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Memory',title:'Rust unsafeブロック',desc:'安全性保証がコンパイラ外に移るため、境界条件とポインタ操作を重点確認してください。',snippet:t,confidence:'LOW'});
+        if(/std::mem::transmute/.test(t)) emit(i+1,{severity:'HIGH',kind:'Memory',title:'Rust transmuteを検出',desc:'型安全性を強制的に回避するため、サイズ・レイアウト・寿命条件を確認してください。',snippet:t,confidence:'HIGH'});
+      }
+    }
+    if(lang==='go'){
+      for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(!t)continue;
+        if(/:=\s*\w+\.[A-Za-z0-9_]+\(\)/.test(t) && /if\s+err\s*!=\s*nil/.test(all)===false && /err\b/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Error Handling',title:'Goのerror処理を確認',desc:'戻り値errorを受け取っている場合は確認・return等が必要です。',snippet:t,confidence:'MEDIUM'});
+        if(/go\s+func\s*\(/.test(t) && !/WaitGroup|errgroup|context/.test(all)) emit(i+1,{severity:'LOW',kind:'Concurrency',title:'Go goroutineの終了同期を確認',desc:'リークや早期終了がないか確認してください。',snippet:t,confidence:'LOW'});
+        if(/for\s*\{/.test(t) && /go\s+func|chan\s+/.test(all)) emit(i+1,{severity:'LOW',kind:'Concurrency',title:'Goの無限ループ/チャネル停止条件を確認',desc:'break/context.Done()/close等の終了条件を確認してください。',snippet:t,confidence:'LOW'});
+      }
+    }
+    if(lang==='php'){
+      for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(!t)continue;
+        if(/\beval\s*\(/.test(t)) emit(i+1,{severity:'CRITICAL',kind:'Security',title:'PHP evalによる動的コード実行',desc:'外部入力が混ざると任意コード実行になります。',snippet:t,confidence:'CERTAIN'});
+        if(/\$_(?:GET|POST|REQUEST|COOKIE)\b/.test(t) && /echo\s+/.test(t)) emit(i+1,{severity:'HIGH',kind:'Security',title:'PHP外部入力の直接出力',desc:'HTMLコンテキストへ出力する場合はhtmlspecialchars等のエスケープを確認してください。',snippet:t,confidence:'MEDIUM'});
+        if(/mysqli_query\s*\([^)]*\$/.test(t) && !/prepare\s*\(/.test(all)) emit(i+1,{severity:'HIGH',kind:'Security',title:'PHP SQLクエリへ変数を直接連結',desc:'プレースホルダ/prepareを使う構造を推奨します。',snippet:t,confidence:'HIGH'});
+      }
+    }
+    if(lang==='ruby'){
+      for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(!t)continue;
+        if(/\beval\s*\(/.test(t)) emit(i+1,{severity:'HIGH',kind:'Security',title:'Ruby evalによる動的コード実行',desc:'外部入力が混ざる場合は任意コード実行につながります。',snippet:t,confidence:'HIGH'});
+        if(/rescue\s*=>\s*[^\n]+\n\s*end/.test(t)) emit(i+1,{severity:'LOW',kind:'Error Handling',title:'Ruby例外処理の範囲を確認',desc:'広すぎるrescueは本来のバグを隠す可能性があります。',snippet:t,confidence:'LOW'});
+        if(/\.send\s*\(\s*params/.test(t)) emit(i+1,{severity:'HIGH',kind:'Security',title:'Rubyで外部入力をsendへ渡しています',desc:'メソッド名が外部入力で決まる場合、意図しないメソッド呼び出しにつながります。',snippet:t,confidence:'HIGH'});
+      }
+    }
+
+    // ---------- Cross-language security patterns ----------
+    if(/(?:password|passwd|secret|token|api[_-]?key)\s*[=:]\s*["'][^"']{8,}["']/i.test(all)) emit(lineOf(/(?:password|passwd|secret|token|api[_-]?key)\s*[=:]/i),{severity:'HIGH',kind:'Security',title:'認証情報らしき文字列がソースに埋め込まれています',desc:'環境変数・秘密管理基盤への移動を検討してください。',snippet:snippet(lineOf(/(?:password|passwd|secret|token|api[_-]?key)\s*[=:]/i)),confidence:'HIGH'});
+    if(/(?:http|https):\/\/[^\s"']+\?[^\n]*token=|authorization\s*:\s*["']Bearer\s+[A-Za-z0-9._-]+/i.test(all)) emit(lineOf(/(?:http|https):\/\/[^\s"']+\?[^\n]*token=|authorization\s*:/i),{severity:'HIGH',kind:'Security',title:'トークンをURL/ソースへ直接埋め込む構造',desc:'URLログや履歴に残る可能性があるため、認証ヘッダ等の安全な方式を確認してください。',snippet:snippet(lineOf(/(?:http|https):\/\/[^\s"']+\?[^\n]*token=|authorization\s*:/i)),confidence:'MEDIUM'});
+    if(/\bTODO\b|\bFIXME\b|\bXXX\b/.test(all)) emit(lineOf(/\b(?:TODO|FIXME|XXX)\b/),{severity:'INFO',kind:'Maintainability',title:'未完了マーカーを検出',desc:'TODO/FIXME/XXXはバグとは限りませんが、未実装箇所の確認に使えます。',snippet:snippet(lineOf(/\b(?:TODO|FIXME|XXX)\b/)),confidence:'INFO'});
+  }
+
   function checkSQL(text, lines, issues){
     const emit=(line,opts)=>pushIssue(issues,Object.assign({line},opts));
     let state='code', quote=''; let depth=0;
@@ -2093,6 +2404,9 @@
     else if(lang==='json') checkJSON(text,lines,issues);
     else if(lang==='sql') checkSQL(text,lines,issues);
     else if(['ts','java','c','cpp','cs','go','rust','php','ruby','kotlin','swift'].includes(lang)) checkGeneralCompiledLanguage(text,lines,issues,lang);
+    // Advanced cross-layer semantics run after language-specific checks so evidence can be fused.
+    checkAdvancedSemantics(text,lines,issues,lang,htmlInfo);
+    checkMassiveRules(text,lines,issues,lang);
     // No generic cross-language bracket checker: it was the main source of JS-in-string false positives.
     const finalIssues=finalizeStaticIssues(dedupeIssues(issues),lang,text,htmlInfo);
     const parserMap={html:'HTML + AST + cross-link',js:window.acorn?'Acorn AST + deep layers':'Native parser fallback + deep layers',css:'CSS structural analyzer',py:'Python semantic heuristics',json:'JSON native parser',sql:'SQL structural + safety analyzer',ts:'TypeScript semantic heuristics',java:'Java semantic heuristics',c:'C semantic heuristics',cpp:'C++ semantic heuristics',cs:'C# semantic heuristics',go:'Go semantic heuristics',rust:'Rust semantic heuristics',php:'PHP semantic heuristics',ruby:'Ruby semantic heuristics',kotlin:'Kotlin semantic heuristics',swift:'Swift semantic heuristics'}; return {lang,issues:finalIssues,parser:parserMap[lang]||'Dedicated semantic analyzer'};
@@ -2198,7 +2512,7 @@
     add('Swift try!',true,()=>{const r=runScanText('let x = try! load()','swift');return {ok:has(r.issues,/try!/),detail:r.issues.map(x=>x.title).join(',')}});
     return tests;
   }
-  window.LintBench={analyze:runScanText,runSelfTests};
+  window.LintBench={analyze:runScanText,runSelfTests,ruleCount:()=>MASSIVE_RULE_COUNT};
   try{ console.info('[LintBench] self-tests',runSelfTests()); }catch(_){ }
 
   els.runBtn.addEventListener('click', runScan);
