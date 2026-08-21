@@ -2118,6 +2118,7 @@ const BOOSTERS=[
 ];
 
 const MASSIVE_RULE_COUNT=MASSIVE_RULES.length;
+const DEEP_PRECISION_ENGINE=true;
 function checkMassiveRules(text,lines,issues,lang){
   for(const rule of MASSIVE_RULES){
     if(rule.lang!==lang || !rule.rx.test(text)) continue;
@@ -2347,6 +2348,201 @@ function checkMassiveRules(text,lines,issues,lang){
     if(htmlInfo.scripts && htmlInfo.scripts.length){ for(const [id,code] of htmlInfo.onclick){ const names=[...code.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)].map(x=>x[1]).filter(x=>!['if','for','while'].includes(x)); for(const name of names) if(!fnNames.has(name)) pushIssue(issues,{severity:'MEDIUM',line:1,kind:'DOM',title:'onclick属性の関数が見つかりません: '+name,desc:'HTMLのonclickとJS側の関数名を確認してください。',confidence:'MEDIUM'}); } }
   }
 
+
+  // v8.0 — deep precision engine: taint, lifecycle, aliasing, contracts, framework idioms.
+  // These checks deliberately require two or more pieces of evidence before promoting a finding.
+  function checkDeepPrecision(text, lines, issues, lang, htmlInfo){
+    const emit=(line,opts)=>pushIssue(issues,Object.assign({line},opts));
+    const lineOf=(rx)=>{const m=text.match(rx);return m?lineAt(text,m.index):1;};
+    const lineText=(n)=>getLineText(lines,Math.max(1,Math.min(lines.length,n)));
+    const windowAround=(m,back=500,front=700)=>text.slice(Math.max(0,m.index-back),Math.min(text.length,m.index+front));
+
+    // ---- Universal taint-like flow: external input -> dangerous sink ----
+    const sources={
+      js:[/location\.(?:search|hash)/i,/document\.cookie\b/i,/localStorage\.getItem\s*\(/i,/sessionStorage\.getItem\s*\(/i,/URLSearchParams\s*\(/i,/FormData\s*\(/i,/prompt\s*\(/i,/window\.name\b/i,/message\.data\b/i],
+      ts:[/location\.(?:search|hash)\b/i,/document\.cookie\b/i,/localStorage\.getItem\s*\(/i,/URLSearchParams\s*\(/i,/FormData\s*\(/i],
+      php:[/\$_(?:GET|POST|REQUEST|COOKIE)\b/i,/php:\/\/input/i],
+      python:[/input\s*\(/i,/request\.(?:args|form|json|data)\b/i,/sys\.argv\b/i],
+      java:[/getParameter\s*\(/i,/getQueryString\s*\(/i,/request\.(?:getInputStream|getReader)\b/i],
+      cs:[/Request\.(?:Query|Form|Body)\b/i,/HttpContext\.(?:Request)\b/i],
+      ruby:[/params\[[^\]]+\]/i,/request\.(?:body|query_parameters)\b/i],
+      go:[/r\.URL\.(?:Query|Path)\b/i,/r\.Form\b/i,/os\.Args\b/i],
+      kotlin:[/request\.getParameter\s*\(/i,/intent\.getStringExtra\s*\(/i],
+      swift:[/CommandLine\.arguments/i,/NotificationCenter/i],
+      c:[/scanf\s*\(/i,/gets\s*\(/i,/argv\b/i],
+      cpp:[/std::cin\b/i,/argv\b/i]
+    };
+    const sinks={
+      js:[/innerHTML\s*=/i,/outerHTML\s*=/i,/insertAdjacentHTML\s*\(/i,/eval\s*\(/i,/new\s+Function\s*\(/i,/document\.write\s*\(/i,/window\.location\s*=/i,/postMessage\s*\(/i],
+      ts:[/innerHTML\s*=/i,/eval\s*\(/i,/new\s+Function\s*\(/i],
+      php:[/echo\s+\$_(?:GET|POST|REQUEST|COOKIE)/i,/mysqli_query\s*\([^)]*\$/i,/PDO\s*\([^)]*\$/i,/shell_exec\s*\(/i],
+      python:[/eval\s*\(/i,/exec\s*\(/i,/subprocess\.[A-Za-z_]+\([^\n]*shell\s*=\s*True/i,/os\.system\s*\(/i,/pickle\.loads?\s*\(/i],
+      java:[/Runtime\.getRuntime\(\)\.exec\s*\(/i,/Statement\.execute(?:Query|Update)?\s*\(/i,/response\.getWriter\(\)\.print/i],
+      cs:[/Process\.Start\s*\(/i,/Response\.Write\s*\(/i,/HtmlRaw\s*\(/i,/SqlCommand\s*\(/i],
+      ruby:[/system\s*\(/i,/`[^`]+`/i,/send\s*\(/i,/eval\s*\(/i],
+      go:[/exec\.Command\s*\(/i,/template\.HTML\s*\(/i,/db\.(?:Query|Exec)\s*\(/i],
+      kotlin:[/Runtime\.getRuntime\(\)\.exec\s*\(/i,/addJavascriptInterface\s*\(/i],
+      swift:[/WKWebView[\s\S]*?loadHTMLString/i,/Process\(\)/i],
+      c:[/system\s*\(/i,/strcpy\s*\(/i,/strcat\s*\(/i,/sprintf\s*\(/i],
+      cpp:[/system\s*\(/i,/strcpy\s*\(/i,/strcat\s*\(/i,/sprintf\s*\(/i]
+    };
+    const src=(sources[lang]||[]).map(r=>r.source).join('|');
+    const snk=(sinks[lang]||[]).map(r=>r.source).join('|');
+    if(src && snk){
+      const sourceRe=new RegExp(src,'im');
+      const sinkRe=new RegExp(snk,'im');
+      const sm=text.match(sourceRe), km=text.match(sinkRe);
+      if(sm && km && sm.index<km.index){
+        const near=windowAround({index:sm.index});
+        const hasAssignment=/\b(?:const|let|var|auto|String|char|int|double|float|var)\s+\w+\s*=/.test(near) || /\b(?:params|request|query|input|data|value)\b/i.test(near);
+        if(hasAssignment){
+          emit(lineAt(text,km.index),{severity:'HIGH',kind:'Security',title:'外部入力から危険シンクへのデータフローを検出',desc:'入力源と危険な出力/実行APIが同一スコープ内でつながっています。サニタイズ、エンコード、パラメータ化、origin検証などを確認してください。',snippet:lineText(lineAt(text,km.index)),confidence:'HIGH',tag:'taint-flow'});
+        }
+      }
+    }
+
+    if(['js','ts'].includes(lang)){
+      // Floating promises / async callbacks.
+      for(let i=0;i<lines.length;i++){
+        const t=lines[i].trim(); if(!t) continue;
+        if(/\b(?:fetch|Promise\.(?:resolve|all|race|any|allSettled)|\w+Async\s*\()/.test(t) && /;\s*$/.test(t) && !/\b(?:await|return|void)\b/.test(t)){
+          emit(i+1,{severity:'MEDIUM',kind:'Async',title:'Promiseを意図せず捨てている可能性',desc:'reject時の未処理や戻り値の欠落がないか確認してください。',snippet:t,confidence:'MEDIUM'});
+        }
+        if(/\.forEach\s*\(\s*async\s+/.test(t)) emit(i+1,{severity:'HIGH',kind:'Async',title:'async forEachは完了待ちされません',desc:'forEachはasync callbackのPromiseを待ちません。順序保証や全件完了が必要ならfor...of / Promise.all等を検討してください。',snippet:t,confidence:'HIGH'});
+        if(/new\s+Promise\s*\(\s*async/.test(t)) emit(i+1,{severity:'LOW',kind:'Async',title:'new Promise(async ...) を確認',desc:'executor自体がPromiseを返してもnew Promiseはそれを待ちません。例外境界や不要なPromiseラップを確認してください。',snippet:t,confidence:'MEDIUM'});
+        if(/\.catch\s*\(\s*\(\s*\)\s*=>\s*\{\s*\}\s*\)/.test(t)) emit(i+1,{severity:'HIGH',kind:'Error Handling',title:'Promiseのcatchで例外を握りつぶしています',desc:'失敗が観測不能になる可能性があります。',snippet:t,confidence:'HIGH'});
+        if(/catch\s*\([^)]*\)\s*\{\s*\}/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Error Handling',title:'空のcatchブロック',desc:'例外を黙って無視している可能性があります。',snippet:t,confidence:'HIGH'});
+        if(/\.addEventListener\s*\(/.test(t) && /for\s*\(|forEach\s*\(/.test(text.slice(Math.max(0,text.lastIndexOf('\n',Math.max(0,text.indexOf(t)-500))),Math.min(text.length,text.indexOf(t)+200)))) emit(i+1,{severity:'MEDIUM',kind:'Event',title:'ループ内イベント登録の累積を確認',desc:'同じDOM要素へループのたびにリスナーを追加すると多重発火します。',snippet:t,confidence:'MEDIUM'});
+        if(/URL\.createObjectURL\s*\(/.test(t) && !/revokeObjectURL/.test(text)) emit(i+1,{severity:'MEDIUM',kind:'Resource',title:'Object URLの解放処理が見当たりません',desc:'長時間動作する画面ではrevokeObjectURL()漏れによるメモリ保持を確認してください。',snippet:t,confidence:'HIGH'});
+        if(/new\s+(?:WebSocket|EventSource)\s*\(/.test(t) && !/(?:\.close\s*\(|addEventListener\s*\(\s*['"](?:close|error)['"])/.test(text)) emit(i+1,{severity:'MEDIUM',kind:'Network',title:'長寿命通信の終了/エラー処理を確認',desc:'WebSocket/EventSourceを作ったまま閉じない設計ではリソース保持や再接続ループを確認してください。',snippet:t,confidence:'MEDIUM'});
+        if(/postMessage\s*\([^,]+,\s*['"]\*['"]\s*\)/.test(t)) emit(i+1,{severity:'HIGH',kind:'Security',title:'postMessageのtargetOriginが*です',desc:'信頼する送信先が決まっている場合は具体的なoriginを指定してください。',snippet:t,confidence:'HIGH'});
+        if(/document\.addEventListener\s*\(\s*['"]DOMContentLoaded['"]/.test(t) && /document\.getElementById\s*\(/.test(t)===false && /document\.querySelector\s*\(/.test(text)) emit(i+1,{severity:'INFO',kind:'Lifecycle',title:'DOM初期化タイミングを確認',desc:'DOM参照がDOMContentLoaded前に実行される経路がないか確認してください。',snippet:t,confidence:'INFO'});
+        if(/return\s+await\s+/.test(t) && /async\s+function/.test(text)) emit(i+1,{severity:'INFO',kind:'Async',title:'return await の意図を確認',desc:'try/catch境界やstack trace目的なら有用ですが、単純なreturnなら余分なawaitになる場合があります。',snippet:t,confidence:'INFO'});
+        if(/Promise\.all\s*\([^)]*\[[^\]]*\]/.test(t) && /\.catch\s*\(/.test(t)===false) emit(i+1,{severity:'LOW',kind:'Async',title:'Promise.allの一部失敗経路を確認',desc:'1件のrejectで全体がrejectされます。部分成功が必要ならallSettled等を検討してください。',snippet:t,confidence:'LOW'});
+      }
+      // Regex denial-of-service heuristic.
+      const q=/\/\((?:[^()\\]|\\.)+\+[)]\+/g; let m; while((m=q.exec(text))) emit(lineAt(text,m.index),{severity:'MEDIUM',kind:'Security',title:'正規表現の過剰バックトラッキング候補',desc:'ネストした量指定子や広いワイルドカードがあると、長い入力で極端に遅くなる可能性があります。',snippet:lineText(lineAt(text,m.index)),confidence:'MEDIUM'});
+    }
+
+    if(lang==='python'){
+      for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(!t)continue;
+        if(/==\s*None\b/.test(t) || /!=\s*None\b/.test(t)) emit(i+1,{severity:'LOW',kind:'Python',title:'PythonでNoneを==/!=比較',desc:'is None / is not None のほうが意図を明確にできます。',snippet:t,confidence:'HIGH'});
+        if(/\bis\s+['"][^'"]+['"]/.test(t) || /\bis\s+\d+\b/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Python',title:'Pythonのisによる値比較候補',desc:'isは同一オブジェクトかを比較します。値比較には==を使います。',snippet:t,confidence:'HIGH'});
+        if(/subprocess\.[A-Za-z_]+\([^\n]*shell\s*=\s*True/.test(t) && /input|request|argv|param/i.test(text)) emit(i+1,{severity:'HIGH',kind:'Security',title:'Python subprocess(shell=True)へ外部入力が近接',desc:'シェル展開によるコマンドインジェクションを確認してください。',snippet:t,confidence:'HIGH'});
+        if(/pickle\.loads?\s*\(/.test(t) && /request|socket|open\(|input\(/i.test(text)) emit(i+1,{severity:'HIGH',kind:'Security',title:'信頼できないpickle入力を復元する可能性',desc:'pickleは任意コード実行につながり得るため、信頼境界を確認してください。',snippet:t,confidence:'HIGH'});
+        if(/for\s+\w+\s+in\s+[^:]+:\s*$/.test(t) && /\.append\s*\(/.test(lines.slice(i,Math.min(lines.length,i+4)).join(' '))) emit(i+1,{severity:'INFO',kind:'Collection',title:'ループ内appendの計算量を確認',desc:'大規模入力では不要な再構築になっていないか確認してください。',snippet:t,confidence:'INFO'});
+        if(/except\s+(?:Exception|BaseException)\s*:/i.test(t) && !/raise\b|logger\.|print\(/.test(lines.slice(i,Math.min(lines.length,i+3)).join(' '))) emit(i+1,{severity:'MEDIUM',kind:'Error Handling',title:'Pythonで広い例外を捕捉後に再通知していません',desc:'本来の障害が隠れる可能性があります。',snippet:t,confidence:'MEDIUM'});
+      }
+    }
+
+    if(lang==='java'){
+      for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(!t)continue;
+        if(/\bString\s+\w+\s*=.*;/.test(t) && /==/.test(t)) emit(i+1,{severity:'HIGH',kind:'Java',title:'Java Stringを==で比較しています',desc:'内容比較ならequals()を使う必要があります。',snippet:t,confidence:'HIGH'});
+        if(/\.get\s*\(\s*\)/.test(t) && /Optional</.test(text)) emit(i+1,{severity:'MEDIUM',kind:'Runtime',title:'Optional.get()による例外経路',desc:'空OptionalではNoSuchElementExceptionになります。orElse/orElseGet等を確認してください。',snippet:t,confidence:'MEDIUM'});
+        if(/Thread\.sleep\s*\(/.test(t) && /synchronized|Executor|Swing|JavaFX|Android/i.test(text)) emit(i+1,{severity:'LOW',kind:'Concurrency',title:'Java Thread.sleepのブロッキングを確認',desc:'UI/共有ロック配下でのsleepは応答停止につながる可能性があります。',snippet:t,confidence:'LOW'});
+        if(/catch\s*\(\s*Exception\s+\w+\s*\)\s*\{\s*\}/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Error Handling',title:'JavaでExceptionを空catch',desc:'障害を握りつぶす可能性があります。',snippet:t,confidence:'HIGH'});
+      }
+    }
+
+    if(lang==='cs'){
+      for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(!t)continue;
+        if(/async\s+void\s+\w+\s*\(/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Async',title:'C# async void',desc:'イベントハンドラ以外のasync voidは呼び出し側で例外・完了待ちを扱いにくくします。',snippet:t,confidence:'HIGH'});
+        if(/\.Result\b|\.Wait\s*\(/.test(t) && /async|Task|SynchronizationContext/i.test(text)) emit(i+1,{severity:'HIGH',kind:'Async',title:'C# Taskの同期ブロック',desc:'デッドロックやスレッド枯渇を起こす経路がないか確認してください。',snippet:t,confidence:'MEDIUM'});
+        if(/\bnew\s+HttpClient\s*\(\s*\)/.test(t) && /for\s*\(|foreach\s*\(/.test(text)) emit(i+1,{severity:'MEDIUM',kind:'Network',title:'ループ内HttpClient生成',desc:'HttpClientは使い捨てではなく再利用する設計を確認してください。',snippet:t,confidence:'MEDIUM'});
+        if(/\bConvert\.To(Int32|Double|Decimal)\s*\(/.test(t) && /Request|Query|Input/i.test(text) && !/TryParse/.test(text)) emit(i+1,{severity:'MEDIUM',kind:'Type',title:'C#外部入力のConvert変換',desc:'不正入力でFormatException/OverflowExceptionが発生する可能性があります。',snippet:t,confidence:'MEDIUM'});
+      }
+    }
+
+    if(lang==='go'){
+      for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(!t)continue;
+        if(/:=\s*[^\n,]+,\s*_\s*=/.test(t) || /,\s*_\s*=\s*[^\n]+/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Go',title:'Goでerror戻り値を_で捨てています',desc:'本当に無視してよいエラーか確認してください。',snippet:t,confidence:'MEDIUM'});
+        if(/defer\s+/.test(t) && /for\s*\{|for\s+/.test(text)) emit(i+1,{severity:'LOW',kind:'Resource',title:'Goループ内deferの蓄積',desc:'deferは関数終了まで実行されないため、ループ回数が多いとリソース保持が蓄積します。',snippet:t,confidence:'MEDIUM'});
+        if(/time\.Tick\s*\(/.test(t) && /for|select/.test(text)) emit(i+1,{severity:'LOW',kind:'Resource',title:'Go time.Tickの終了管理を確認',desc:'長寿命tickが不要になった後の停止方法を確認してください。',snippet:t,confidence:'LOW'});
+        if(/map\s*\[[^\]]+\][^\n=]+/.test(t) && /go\s+func/.test(text) && !/sync\.Mutex|sync\.Map/.test(text)) emit(i+1,{severity:'LOW',kind:'Concurrency',title:'Go mapの並行アクセスを確認',desc:'複数goroutineからの書き込みはdata race/panicにつながります。',snippet:t,confidence:'LOW'});
+      }
+    }
+
+    if(lang==='rust'){
+      for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(!t)continue;
+        if(/\.unwrap\s*\(\s*\)/.test(t) && /Result|Option|read_to|parse|recv/.test(text)) emit(i+1,{severity:'MEDIUM',kind:'Rust',title:'Rust unwrap()の失敗経路',desc:'Result/OptionがErr/Noneになった場合panicします。',snippet:t,confidence:'MEDIUM'});
+        if(/\.expect\s*\(/.test(t) && /Result|Option/.test(text)) emit(i+1,{severity:'LOW',kind:'Rust',title:'Rust expect()のpanic経路',desc:'失敗条件が実運用で起こり得ないか確認してください。',snippet:t,confidence:'LOW'});
+        if(/Rc<|RefCell</.test(t) && /thread::spawn|std::thread/.test(text) && !/Arc<|Mutex</.test(text)) emit(i+1,{severity:'HIGH',kind:'Concurrency',title:'Rust非同期/スレッド境界の共有状態を確認',desc:'Rc/RefCellはSend/Sync前提ではないため、共有方法を確認してください。',snippet:t,confidence:'HIGH'});
+        if(/std::mem::forget\s*\(/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Resource',title:'Rust mem::forget',desc:'Dropを意図的に飛ばすため、リソース解放を確認してください。',snippet:t,confidence:'MEDIUM'});
+      }
+    }
+
+    if(lang==='php'){
+      for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(!t)continue;
+        if(/\$_(?:GET|POST|REQUEST)\[[^\]]+\]\s*==\s*['"]/.test(t)) emit(i+1,{severity:'LOW',kind:'PHP',title:'PHP外部入力を弱い比較で判定',desc:'型変換による意図しない真偽を避けるため厳密比較を確認してください。',snippet:t,confidence:'MEDIUM'});
+        if(/md5\s*\(\s*\$_/i.test(t) || /sha1\s*\(\s*\$_/i.test(t)) emit(i+1,{severity:'HIGH',kind:'Security',title:'PHPで外部入力をMD5/SHA1へ直接渡しています',desc:'パスワード用途ならpassword_hash/password_verify等を使用してください。',snippet:t,confidence:'HIGH'});
+        if(/unserialize\s*\(\s*\$_/.test(t)) emit(i+1,{severity:'CRITICAL',kind:'Security',title:'PHP外部入力のunserialize',desc:'PHPオブジェクトインジェクションにつながる可能性があります。',snippet:t,confidence:'HIGH'});
+      }
+    }
+
+    if(lang==='ruby'){
+      for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(!t)continue;
+        if(/system\s*\(.*params\[/.test(t) || /`[^`]*params\[/.test(t)) emit(i+1,{severity:'HIGH',kind:'Security',title:'Ruby外部入力をOSコマンドへ渡しています',desc:'コマンドインジェクションの可能性があります。',snippet:t,confidence:'HIGH'});
+        if(/\.constantize\b|\.constantize\(/.test(t) && /params\[/.test(text)) emit(i+1,{severity:'HIGH',kind:'Security',title:'Rubyのconstantizeに外部入力が近接',desc:'任意クラス参照につながる経路を確認してください。',snippet:t,confidence:'MEDIUM'});
+        if(/before_action\s+:\w+/.test(t) && /skip_before_action/.test(text)) emit(i+1,{severity:'LOW',kind:'Rails',title:'Rails認証フックの除外範囲を確認',desc:'skip_before_actionで重要な保護が外れていないか確認してください。',snippet:t,confidence:'LOW'});
+      }
+    }
+
+    if(lang==='kotlin'){
+      for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(!t)continue;
+        if(/GlobalScope\.launch\s*\{/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Concurrency',title:'Kotlin GlobalScope使用',desc:'ライフサイクルと無関係にCoroutineが残る可能性があります。構造化並行性を確認してください。',snippet:t,confidence:'HIGH'});
+        if(/runBlocking\s*\{/.test(t) && /Android|Activity|Fragment|Dispatchers/.test(text)) emit(i+1,{severity:'MEDIUM',kind:'Async',title:'Kotlin runBlockingのUIブロック候補',desc:'UIスレッドで待機するとフリーズにつながる可能性があります。',snippet:t,confidence:'MEDIUM'});
+        if(/lateinit\s+var\s+/.test(t) && /onCreate|onStart|onResume/.test(text)) emit(i+1,{severity:'LOW',kind:'Runtime',title:'Kotlin lateinit初期化順序を確認',desc:'参照前に必ず初期化される経路を確認してください。',snippet:t,confidence:'LOW'});
+      }
+    }
+
+    if(lang==='swift'){
+      for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(!t)continue;
+        if(/\btry!/.test(t) || /\bas!\b/.test(t)) emit(i+1,{severity:'HIGH',kind:'Runtime',title:'Swift強制失敗/強制型変換',desc:'実データが想定外だと実行時クラッシュになります。',snippet:t,confidence:'HIGH'});
+        if(/URLSession\.(?:shared\.)?dataTask/.test(t) && !/resume\s*\(/.test(text)) emit(i+1,{severity:'HIGH',kind:'Network',title:'Swift URLSession taskの開始処理が見当たりません',desc:'dataTask生成後にresume()が必要なAPI形態か確認してください。',snippet:t,confidence:'HIGH'});
+        if(/DispatchQueue\.main\.sync/.test(t)) emit(i+1,{severity:'CRITICAL',kind:'Concurrency',title:'Swift main queueへの同期dispatch',desc:'main queue上から呼ぶとデッドロックする典型パターンです。',snippet:t,confidence:'HIGH'});
+        if(/NotificationCenter\.default\.addObserver/.test(t) && !/removeObserver/.test(text)) emit(i+1,{severity:'MEDIUM',kind:'Lifecycle',title:'Swift NotificationCenter observerの解除を確認',desc:'ライフサイクルによってはobserverが残り続ける可能性があります。',snippet:t,confidence:'MEDIUM'});
+      }
+    }
+
+    if(['c','cpp'].includes(lang)){
+      let allocs=0,frees=0;
+      for(let i=0;i<lines.length;i++){const t=lines[i].trim();if(!t)continue;
+        if(/\bmalloc\s*\(/.test(t)||/\bcalloc\s*\(/.test(t)||/\brealloc\s*\(/.test(t)) allocs++;
+        if(/\bfree\s*\(/.test(t)) frees++;
+        if(/\bstrncpy\s*\([^,]+,[^,]+,\s*sizeof\s*\(/.test(t)) emit(i+1,{severity:'MEDIUM',kind:'Memory',title:'C/C++ strncpyの終端保証を確認',desc:'コピー長とnull終端の関係を確認してください。',snippet:t,confidence:'MEDIUM'});
+        if(/\bmemcpy\s*\([^,]+,[^,]+,\s*strlen\s*\(/.test(t)) emit(i+1,{severity:'HIGH',kind:'Memory',title:'C/C++ memcpyの長さ計算を確認',desc:'終端文字分を含める必要がある場合や、宛先サイズ不足の可能性があります。',snippet:t,confidence:'MEDIUM'});
+        if(/\bfree\s*\(([^)]+)\)\s*;/.test(t) && /\1/.test(lines.slice(i+1,i+4).join(' '))) emit(i+1,{severity:'HIGH',kind:'Memory',title:'free後の同じポインタ参照候補',desc:'use-after-freeの経路がないか確認してください。',snippet:t,confidence:'MEDIUM'});
+        if(/\bfor\s*\([^;]*;[^;]*<\s*strlen\s*\(/.test(t)) emit(i+1,{severity:'LOW',kind:'Performance',title:'C/C++ループ内strlenを確認',desc:'文字列長を毎回再計算する構造ならループ外で保持すると改善できます。',snippet:t,confidence:'MEDIUM'});
+      }
+      if(allocs>0 && frees===0) emit(1,{severity:'MEDIUM',kind:'Memory',title:'動的確保に対応する解放処理が見当たりません',desc:'malloc/calloc/reallocが存在する一方、freeが検出されません。別関数で解放する設計なら問題ありません。',snippet:lineText(1),confidence:'LOW'});
+    }
+
+    // ---- HTML/CSS project-level precision ----
+    if(lang==='html' && htmlInfo){
+      const allIds=[...htmlInfo.ids.keys()], allClasses=[...htmlInfo.classes.keys()];
+      // duplicate ids are already strong; add CSS/JS cross-layer severity when referenced.
+      for(const [id,arr] of htmlInfo.ids){
+        if(arr.length>1 && (new RegExp('getElementById\\(["\\\']'+escReg(id)+'["\\\']\\)').test(text) || new RegExp('#'+escReg(id)+'\\b').test(text))){
+          emit(arr[1],{severity:'HIGH',kind:'Cross Layer',title:'重複idがJS/CSS参照と衝突しています: '+id,desc:'id重複だけでなく、getElementById/CSS selectorの参照先が不定になります。',snippet:lineText(arr[1]),confidence:'CERTAIN'});
+        }
+      }
+      if(/<script\b[^>]*src=["'][^"']+["'][^>]*>/.test(text) && /document\.write\s*\(/.test(text)) emit(lineOf(/document\.write\s*\(/),{severity:'HIGH',kind:'HTML/JS',title:'外部scriptとdocument.writeの組み合わせ',desc:'読み込みタイミングや遅延ロードでDOM破壊・予期せぬ位置への挿入が起こる可能性があります。',snippet:lineText(lineOf(/document\.write\s*\(/)),confidence:'MEDIUM'});
+      const formNames=[...text.matchAll(/<form\b[^>]*\bname=["']([^"']+)["']/gi)].map(m=>m[1]);
+      const inputNames=[...text.matchAll(/<input\b[^>]*\bname=["']([^"']+)["']/gi)].map(m=>m[1]);
+      if(new Set(formNames).size<formNames.length) emit(lineOf(/<form\b/i),{severity:'LOW',kind:'HTML',title:'form nameの重複',desc:'JSの参照や古いフォームAPIでは意図しない対象になる可能性があります。',snippet:lineText(lineOf(/<form\b/i)),confidence:'LOW'});
+      if(/<label\b[^>]*\bfor=["'][^"']+["']/.test(text)){
+        for(const m of text.matchAll(/<label\b[^>]*\bfor=["']([^"']+)["']/gi)) if(!allIds.includes(m[1])) emit(lineAt(text,m.index),{severity:'MEDIUM',kind:'Accessibility',title:'labelのfor先が存在しません: '+m[1],desc:'対応するidを持つフォーム要素が見つかりません。',snippet:lineText(lineAt(text,m.index)),confidence:'HIGH'});
+      }
+      for(const m of text.matchAll(/<input\b[^>]*\btype=["'](email|url|number|date|password)["']/gi)){
+        const block=m[0]; if(/autocomplete=/.test(block)===false && /password|email/.test(block)) emit(lineAt(text,m.index),{severity:'LOW',kind:'Accessibility',title:'入力欄のautocompleteを確認',desc:'フォームの目的に応じてautocomplete属性を指定するとブラウザの補完挙動を明確にできます。',snippet:lineText(lineAt(text,m.index)),confidence:'LOW'});
+      }
+      // CSS variable contract: use of var(--x) without definition.
+      const vars=[...text.matchAll(/var\(\s*(--[A-Za-z0-9_-]+)/g)].map(m=>m[1]);
+      const defs=new Set([...text.matchAll(/(--[A-Za-z0-9_-]+)\s*:/g)].map(m=>m[1]));
+      for(const v of new Set(vars)) if(!defs.has(v)) emit(1,{severity:'MEDIUM',kind:'CSS',title:'未定義CSS変数を使用: '+v,desc:'var('+v+') の定義がこのファイル内で見つかりません。外部CSSやテーマ変数なら問題ありません。',snippet:'var('+v+')',confidence:'MEDIUM'});
+    }
+  }
+
   function finalizeStaticIssues(issues, lang, text, htmlInfo){
     const out=[];
     const seen=new Map();
@@ -2406,6 +2602,7 @@ function checkMassiveRules(text,lines,issues,lang){
     else if(['ts','java','c','cpp','cs','go','rust','php','ruby','kotlin','swift'].includes(lang)) checkGeneralCompiledLanguage(text,lines,issues,lang);
     // Advanced cross-layer semantics run after language-specific checks so evidence can be fused.
     checkAdvancedSemantics(text,lines,issues,lang,htmlInfo);
+    checkDeepPrecision(text,lines,issues,lang,htmlInfo);
     checkMassiveRules(text,lines,issues,lang);
     // No generic cross-language bracket checker: it was the main source of JS-in-string false positives.
     const finalIssues=finalizeStaticIssues(dedupeIssues(issues),lang,text,htmlInfo);
@@ -2512,7 +2709,7 @@ function checkMassiveRules(text,lines,issues,lang){
     add('Swift try!',true,()=>{const r=runScanText('let x = try! load()','swift');return {ok:has(r.issues,/try!/),detail:r.issues.map(x=>x.title).join(',')}});
     return tests;
   }
-  window.LintBench={analyze:runScanText,runSelfTests,ruleCount:()=>MASSIVE_RULE_COUNT};
+  window.LintBench={analyze:runScanText,runSelfTests,ruleCount:()=>MASSIVE_RULE_COUNT,deepPrecision:()=>DEEP_PRECISION_ENGINE};
   try{ console.info('[LintBench] self-tests',runSelfTests()); }catch(_){ }
 
   els.runBtn.addEventListener('click', runScan);
