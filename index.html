@@ -232,6 +232,7 @@
   .dropzone .dz-sub{font-size:12.5px;color:var(--text-lo);}
   .dropzone .dz-sub .accent{color:var(--accent);}
   input[type=file]{display:none;}
+  #filePickBtn{display:inline-flex;align-items:center;justify-content:center;}
 
   .file-badge{
     display:none;
@@ -585,6 +586,7 @@
     <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="ファイルを選択またはドラッグ&ドロップ">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
       <div class="dz-title">クリックして選択、またはドラッグ&ドロップ</div>
+      <button type="button" id="filePickBtn" class="ai-btn" style="margin-top:10px">ファイルを選択</button>
       <div class="dz-sub">対応: <span class="accent">.txt</span> / .html / .css / .js / .ts / .py / .java / .c / .cpp / .cs / .go / .rs / .php / .rb / .sql / .kt / .swift / .json（テキスト形式のみ・最大 2MB）</div>
     </div>
     <input type="file" id="fileInput" accept=".txt,.html,.htm,.css,.js,.jsx,.mjs,.ts,.tsx,.py,.json,.java,.c,.h,.cc,.cpp,.cxx,.hpp,.cs,.go,.rs,.php,.rb,.sql,.kt,.kts,.swift">
@@ -628,7 +630,83 @@
 
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/acorn@8.18.0/dist/acorn.js" crossorigin="anonymous"></script>
+
+<script>
+(function(){
+  "use strict";
+  // UI bootstrap: this script is intentionally independent from the large analyzer below.
+  // Even if the analyzer fails to initialize, typing, file selection, and the run button stay alive.
+  const $ = id => document.getElementById(id);
+  const code = $('codeInput'), count = $('lineCount'), run = $('runBtn'), meta = $('runMeta');
+  const tabPaste = $('tabPaste'), tabFile = $('tabFile'), pastePanel = $('pastePanel'), filePanel = $('filePanel');
+  const drop = $('dropzone'), file = $('fileInput'), pick = $('filePickBtn'), badge = $('fileBadge'), fname = $('fnameDisplay');
+  let mode='paste', fileText='', fileName='';
+  const text=()=>mode==='paste' ? String(code?.value||'') : fileText;
+  function sync(){
+    const v=String(code?.value||'');
+    if(count) count.textContent=(v ? v.split(/\r\n|\r|\n/).length : 0)+' 行 / '+v.length+' 文字';
+    const has=text().trim().length>0;
+    if(run) run.disabled=!has;
+    if(meta) meta.textContent=has ? (mode==='file' ? '「'+fileName+'」を検査できます' : 'コードを検査できます') : 'コードを入力すると実行できます';
+  }
+  function setMode(m){
+    mode=m;
+    tabPaste?.classList.toggle('active',m==='paste'); tabFile?.classList.toggle('active',m==='file');
+    tabPaste?.setAttribute('aria-selected',String(m==='paste')); tabFile?.setAttribute('aria-selected',String(m==='file'));
+    if(pastePanel) pastePanel.style.display=m==='paste'?'':'none';
+    if(filePanel) filePanel.style.display=m==='file'?'':'none';
+    sync();
+  }
+  function handle(f){
+    if(!f) return;
+    if(f.size>2*1024*1024){ alert('ファイルサイズが大きすぎます（上限 2MB）。'); return; }
+    const r=new FileReader();
+    r.onload=e=>{ fileText=String(e.target?.result||''); fileName=f.name||'uploaded-file'; if(fname) fname.textContent=fileName+'  ('+f.size+' B)'; badge?.classList.add('show'); setMode('file'); sync(); };
+    r.onerror=()=>alert('ファイルの読み込みに失敗しました。');
+    r.readAsText(f,'UTF-8');
+  }
+  tabPaste && (tabPaste.onclick=()=>setMode('paste'));
+  tabFile && (tabFile.onclick=()=>setMode('file'));
+  code && (code.oninput=sync, code.onchange=sync, code.oncompositionend=sync);
+  pick && (pick.onclick=e=>{e.preventDefault();e.stopPropagation(); try{file?.showPicker?.();}catch(_){file?.click();}});
+  drop && (drop.onclick=e=>{if(e.target===pick)return; try{file?.showPicker?.();}catch(_){file?.click();}});
+  file && (file.onchange=e=>handle(e.target?.files?.[0]));
+  drop && (drop.ondragover=e=>{e.preventDefault();drop.classList.add('drag');});
+  drop && (drop.ondragleave=e=>{e.preventDefault();drop.classList.remove('drag');});
+  drop && (drop.ondrop=e=>{e.preventDefault();drop.classList.remove('drag');handle(e.dataTransfer?.files?.[0]);});
+  run && (run.onclick=()=>{
+    const source=text();
+    if(!source.trim()){sync();return;}
+    try{
+      if(window.LintBench && typeof window.LintBench.analyze==='function'){
+        const ext=fileName.includes('.')?fileName.split('.').pop().toLowerCase():'';
+        const map={html:'html',htm:'html',css:'css',js:'js',jsx:'js',mjs:'js',ts:'ts',tsx:'ts',py:'py',json:'json',java:'java',c:'c',h:'c',cc:'cpp',cpp:'cpp',cxx:'cpp',hpp:'cpp',cs:'cs',go:'go',rs:'rust',php:'php',rb:'ruby',sql:'sql',kt:'kotlin',kts:'kotlin',swift:'swift'};
+        const forced=$('langSelect')?.value==='auto' ? (map[ext]||null) : $('langSelect')?.value;
+        const result=window.LintBench.analyze(source,forced,forced);
+        window.__lintBootstrapResult=result;
+        const out=$('resultsBody'), summary=$('summaryStrip'), results=$('results');
+        results?.classList.add('show');
+        if(summary) summary.innerHTML='<span class="sum-pill ok">解析エンジン起動済み</span><span class="sum-pill info">'+result.lang+'</span><span class="sum-pill info">'+result.issues.length+'件</span>';
+        if(out) out.innerHTML='<div class="clean-msg">検査完了。検出件数: '+result.issues.length+'件。詳細は通常画面に表示されます。</div>';
+        if(typeof window.__lintRender==='function') window.__lintRender(result);
+      }else{
+        const out=$('resultsBody'), summary=$('summaryStrip'), results=$('results');
+        results?.classList.add('show');
+        if(summary) summary.innerHTML='<span class="sum-pill warn">解析エンジン準備中</span>';
+        if(out) out.innerHTML='<div class="clean-msg">UIは正常に動作していますが、解析エンジンの起動に失敗しています。ページを再読み込みしてください。</div>';
+      }
+    }catch(err){
+      const results=$('results'), summary=$('summaryStrip'), out=$('resultsBody'); results?.classList.add('show');
+      if(summary) summary.innerHTML='<span class="sum-pill err">検査エンジンエラー</span>';
+      if(out) out.innerHTML='<div class="clean-msg">'+String(err?.message||err)+'</div>';
+      console.error(err);
+    }
+  });
+  window.__lintBootstrap={sync,setMode,handle};
+  sync();
+})();
+</script>
+<script src="https://cdn.jsdelivr.net/npm/acorn@8.18.0/dist/acorn.js" crossorigin="anonymous" defer></script>
 <script>
 (function(){
   "use strict";
@@ -645,6 +723,7 @@
     fileBadge: document.getElementById('fileBadge'),
     fnameDisplay: document.getElementById('fnameDisplay'),
     clearFileBtn: document.getElementById('clearFileBtn'),
+    filePickBtn: document.getElementById('filePickBtn'),
     langSelect: document.getElementById('langSelect'),
     runBtn: document.getElementById('runBtn'),
     runMeta: document.getElementById('runMeta'),
@@ -660,122 +739,107 @@
     lastScan: null,
   };
 
-  /* ---------------- タブ切替 ---------------- */
-  function setMode(mode){
-    state.mode = mode;
-    els.tabPaste.classList.toggle('active', mode === 'paste');
-    els.tabFile.classList.toggle('active', mode === 'file');
-    els.tabPaste.setAttribute('aria-selected', mode === 'paste');
-    els.tabFile.setAttribute('aria-selected', mode === 'file');
-    els.pastePanel.style.display = mode === 'paste' ? '' : 'none';
-    els.filePanel.style.display = mode === 'file' ? '' : 'none';
-    updateRunState();
+  /* ---------------- 安定版UIバインド ---------------- */
+  // 重い解析エンジンとは完全に分離。UIは先に確実に動くようにする。
+  function safeCurrentText(){
+    return state.mode === 'paste' ? String(els.codeInput?.value || '') : String(state.fileText || '');
   }
-  els.tabPaste.addEventListener('click', () => setMode('paste'));
-  els.tabFile.addEventListener('click', () => setMode('file'));
-
-  /* ---------------- 文字数カウント ---------------- */
-  function syncEditorMeta(){
-    const v = els.codeInput.value || '';
+  function syncEditorMetaSafe(){
+    const v = String(els.codeInput?.value || '');
     const lines = v.length ? v.split(/\r\n|\r|\n/).length : 0;
-    els.lineCount.textContent = lines + ' 行 / ' + v.length + ' 文字';
-    updateRunState();
+    if(els.lineCount) els.lineCount.textContent = lines + ' 行 / ' + v.length + ' 文字';
+    const has = safeCurrentText().trim().length > 0;
+    if(els.runBtn) els.runBtn.disabled = !has;
+    if(els.runMeta && !has) els.runMeta.textContent = 'コードを入力すると実行できます';
+    else if(els.runMeta && state.mode === 'paste' && has) els.runMeta.textContent = 'コードを検査できます';
   }
-  let editorSyncQueued = false;
-  function queueEditorSync(){
-    if(editorSyncQueued) return;
-    editorSyncQueued = true;
-    const run = () => { editorSyncQueued = false; syncEditorMeta(); };
-    if(typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
-    else setTimeout(run,0);
-  }
-  ['input','change','compositionend','paste','drop'].forEach(type => {
-    els.codeInput.addEventListener(type, queueEditorSync, {passive:true});
-  });
-  els.codeInput.addEventListener('beforeinput', queueEditorSync, {passive:true});
-  syncEditorMeta();
-
-  /* ---------------- ファイル読み込み ---------------- */
-  function readFile(file){
-    if (!file) return;
-    if (file.size > 2 * 1024 * 1024){
-      alert('ファイルサイズが大きすぎます（上限 2MB）。');
-      return;
+  function bindInputSafe(){
+    if(els.codeInput){
+      els.codeInput.oninput = syncEditorMetaSafe;
+      els.codeInput.onchange = syncEditorMetaSafe;
+      els.codeInput.oncompositionend = syncEditorMetaSafe;
+      els.codeInput.onpaste = () => setTimeout(syncEditorMetaSafe, 0);
+      els.codeInput.ondrop = () => setTimeout(syncEditorMetaSafe, 0);
     }
+  }
+  function setModeSafe(mode){
+    state.mode = mode;
+    if(els.tabPaste) { els.tabPaste.classList.toggle('active', mode === 'paste'); els.tabPaste.setAttribute('aria-selected', mode === 'paste'); }
+    if(els.tabFile) { els.tabFile.classList.toggle('active', mode === 'file'); els.tabFile.setAttribute('aria-selected', mode === 'file'); }
+    if(els.pastePanel) els.pastePanel.style.display = mode === 'paste' ? '' : 'none';
+    if(els.filePanel) els.filePanel.style.display = mode === 'file' ? '' : 'none';
+    syncEditorMetaSafe();
+    if(mode === 'file' && els.runMeta && state.fileText) els.runMeta.textContent = '「' + state.fileName + '」を検査できます';
+  }
+  function handleFileSafe(file){
+    if(!file) return;
+    if(file.size > 2 * 1024 * 1024){ alert('ファイルサイズが大きすぎます（上限 2MB）。'); return; }
     const reader = new FileReader();
-    reader.onload = (e) => {
-      state.fileText = e.target.result;
-      state.fileName = file.name;
-      els.fnameDisplay.textContent = file.name + '  (' + formatBytes(file.size) + ')';
-      els.fileBadge.classList.add('show');
-      autoDetectFromName(file.name);
-      updateRunState();
+    reader.onload = e => {
+      state.fileText = String(e.target?.result || '');
+      state.fileName = file.name || 'uploaded-file';
+      if(els.fnameDisplay) els.fnameDisplay.textContent = state.fileName + '  (' + formatBytes(file.size) + ')';
+      if(els.fileBadge) els.fileBadge.classList.add('show');
+      autoDetectFromName(state.fileName);
+      syncEditorMetaSafe();
+      if(els.runMeta) els.runMeta.textContent = '「' + state.fileName + '」を検査できます';
     };
     reader.onerror = () => alert('ファイルの読み込みに失敗しました。テキスト形式のファイルを指定してください。');
     reader.readAsText(file, 'UTF-8');
   }
-
   function formatBytes(n){
-    if (n < 1024) return n + ' B';
-    if (n < 1024*1024) return (n/1024).toFixed(1) + ' KB';
+    if(n < 1024) return n + ' B';
+    if(n < 1024*1024) return (n/1024).toFixed(1) + ' KB';
     return (n/1024/1024).toFixed(2) + ' MB';
   }
-
   function autoDetectFromName(name){
-    const ext = (name.split('.').pop() || '').toLowerCase();
-    const map = { html:'html', htm:'html', css:'css', js:'js', jsx:'js', mjs:'js', ts:'ts', tsx:'ts', py:'py', json:'json', java:'java', c:'c', h:'c', cc:'cpp', cpp:'cpp', cxx:'cpp', hpp:'cpp', cs:'cs', go:'go', rs:'rust', php:'php', rb:'ruby', sql:'sql', kt:'kotlin', kts:'kotlin', swift:'swift' };
-    if (map[ext] && els.langSelect.value === 'auto'){
-      // ヒントとして保持のみ。ユーザーがセレクトを操作していなければ auto のまま解析側で使う
-      els.dropzone.dataset.detected = map[ext];
-    }
+    const ext=(name.split('.').pop()||'').toLowerCase();
+    const map={html:'html',htm:'html',css:'css',js:'js',jsx:'js',mjs:'js',ts:'ts',tsx:'ts',py:'py',json:'json',java:'java',c:'c',h:'c',cc:'cpp',cpp:'cpp',cxx:'cpp',hpp:'cpp',cs:'cs',go:'go',rs:'rust',php:'php',rb:'ruby',sql:'sql',kt:'kotlin',kts:'kotlin',swift:'swift'};
+    if(els.dropzone && map[ext] && els.langSelect?.value === 'auto') els.dropzone.dataset.detected=map[ext];
   }
 
-  els.dropzone.addEventListener('click', () => els.fileInput.click());
-  els.dropzone.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); els.fileInput.click(); }
-  });
-  els.fileInput.addEventListener('change', (e) => readFile(e.target.files[0]));
+  // タブ
+  if(els.tabPaste) els.tabPaste.onclick=()=>setModeSafe('paste');
+  if(els.tabFile) els.tabFile.onclick=()=>setModeSafe('file');
 
-  ['dragenter','dragover'].forEach(evt => {
-    els.dropzone.addEventListener(evt, (e) => {
-      e.preventDefault(); e.stopPropagation();
-      els.dropzone.classList.add('drag');
-    });
-  });
-  ['dragleave','drop'].forEach(evt => {
-    els.dropzone.addEventListener(evt, (e) => {
-      e.preventDefault(); e.stopPropagation();
-      els.dropzone.classList.remove('drag');
-    });
-  });
-  els.dropzone.addEventListener('drop', (e) => {
-    const file = e.dataTransfer.files && e.dataTransfer.files[0];
-    readFile(file);
-  });
+  // file inputはlabel[for]でネイティブ起動。キーボード操作とD&DだけJSで補助。
+  if(els.dropzone){
+    els.dropzone.onkeydown=e=>{
+      if(e.key==='Enter'||e.key===' '){ e.preventDefault(); try{ els.fileInput?.showPicker?.(); }catch(_){ try{els.fileInput?.click();}catch(__){} } }
+    };
+    els.dropzone.ondragover=e=>{e.preventDefault();e.stopPropagation();els.dropzone.classList.add('drag');};
+    els.dropzone.ondragleave=e=>{e.preventDefault();e.stopPropagation();els.dropzone.classList.remove('drag');};
+    els.dropzone.ondrop=e=>{e.preventDefault();e.stopPropagation();els.dropzone.classList.remove('drag');handleFileSafe(e.dataTransfer?.files?.[0]);};
+  }
+  if(els.fileInput) els.fileInput.onchange=e=>handleFileSafe(e.target?.files?.[0]);
+  if(els.clearFileBtn) els.clearFileBtn.onclick=()=>{
+    state.fileText=''; state.fileName='';
+    if(els.fileInput) els.fileInput.value='';
+    if(els.fileBadge) els.fileBadge.classList.remove('show');
+    if(els.dropzone) delete els.dropzone.dataset.detected;
+    syncEditorMetaSafe();
+  };
+  if(els.langSelect) els.langSelect.onchange=syncEditorMetaSafe;
 
-  els.clearFileBtn.addEventListener('click', () => {
-    state.fileText = '';
-    state.fileName = '';
-    els.fileInput.value = '';
-    els.fileBadge.classList.remove('show');
-    delete els.dropzone.dataset.detected;
-    updateRunState();
-  });
+  // 文字入力はinputイベントを直接受け、Safari/Chrome/IMEでも即反映
+  bindInputSafe();
+  syncEditorMetaSafe();
+
+  // 実行ボタンもUI層で先に確保。解析エンジンの初期化エラーがあっても押せる。
+  if(els.runBtn) els.runBtn.onclick=()=>{
+    try{
+      if(typeof runScan==='function') runScan();
+      else throw new Error('解析エンジンの初期化が完了していません');
+    }catch(err){
+      if(els.results) els.results.classList.add('show');
+      if(els.summaryStrip) els.summaryStrip.innerHTML='<span class="sum-pill err">実行エラー</span>';
+      if(els.resultsBody) els.resultsBody.innerHTML='<div class="clean-msg">'+escapeHTML(err?.message||String(err))+'</div>';
+    }
+  };
 
   /* ---------------- 実行可否 ---------------- */
-  function currentText(){
-    return state.mode === 'paste' ? els.codeInput.value : state.fileText;
-  }
-
-  function updateRunState(){
-    const has = currentText().trim().length > 0;
-    els.runBtn.disabled = !has;
-    els.runMeta.textContent = has
-      ? (state.mode === 'file' ? ('「' + state.fileName + '」を検査できます') : 'コードを検査できます')
-      : 'コードを入力すると実行できます';
-  }
-
-  els.langSelect.addEventListener('change', updateRunState);
+  function currentText(){ return safeCurrentText(); }
+  function updateRunState(){ syncEditorMetaSafe(); }
 
   /* ================================================================
      v6.0 静的解析エンジン
@@ -2821,7 +2885,6 @@ function checkMassiveRules(text,lines,issues,lang){
   };
   runSelfTestsAsync();
 
-  els.runBtn.addEventListener('click', runScan);
 
   // Ctrl/Cmd + Enter でも実行
   els.codeInput.addEventListener('keydown', (e) => {
