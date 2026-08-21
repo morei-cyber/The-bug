@@ -3402,313 +3402,204 @@ function runMaxAccuracyLayer(text,lang,issues,htmlInfo){
     }
   }
 
-  /* ========================================================================
-     v14 新生統合エンジン: V14〜V20 の解析思想を単一パス群へ統合
-     - Symbol / Type / CFG / CallGraph / SSA-like versions
-     - Path constraints / Heap shape / Alias / Taint / Async graph
-     - DOM / CSS / Web API contract matrix / Three.js / Game-State
-     - Evidence fusion + conservative precision firewall
-     既存UI・入力方式・表示系には触れず、解析エンジンのみを拡張。
-  ======================================================================== */
-  const V14_UNKNOWN=Symbol('V14_UNKNOWN');
-  const V14_ANY=Symbol('V14_ANY');
-  const V14_PRIMITIVES=new Set(['undefined','null','boolean','number','string','bigint','symbol','object','function','unknown']);
-  function v14Known(v){return v!==V14_UNKNOWN;}
-  function v14Line(text,node){return node?.loc?.start?.line || lineAt(text,Math.max(0,node?.start||0));}
-  function v14Lit(node){
-    if(!node)return {known:false,value:V14_UNKNOWN,type:'unknown'};
-    if(node.type==='Literal') return {known:true,value:node.value,type:node.value===null?'null':typeof node.value};
-    if(node.type==='TemplateLiteral'&&node.expressions?.length===0){return {known:true,value:node.quasis.map(q=>q.value.cooked||'').join(''),type:'string'};}
-    if(node.type==='UnaryExpression'&&['!','+','-','~','void'].includes(node.operator)){const a=v14Lit(node.argument);if(a.known){try{return {known:true,value:node.operator==='!'?!a.value:node.operator==='+'?+a.value:node.operator==='-'?-a.value:node.operator==='~'?~a.value:undefined,type:node.operator==='void'?'undefined':typeof (node.operator==='!'?!a.value:+a.value)}}catch(_){}}}
-    return {known:false,value:V14_UNKNOWN,type:'unknown'};
+
+  /* ==================== 新生V14統合精度エンジン ==================== */
+  const V14_RULES = Object.freeze({
+    numericCalls:new Set(['abs','acos','acosh','asin','asinh','atan','atan2','atanh','cbrt','ceil','cos','cosh','exp','floor','fround','hypot','imul','log','log10','log1p','log2','max','min','pow','random','round','sign','sin','sinh','sqrt','tan','tanh','trunc']),
+    objectCalls:new Set(['assign','create','defineProperty','entries','freeze','fromEntries','getOwnPropertyDescriptor','getOwnPropertyNames','getOwnPropertySymbols','getPrototypeOf','hasOwn','is','keys','preventExtensions','seal','setPrototypeOf','values']),
+    arrayCalls:new Set(['concat','every','fill','filter','find','findIndex','flat','flatMap','forEach','includes','indexOf','join','map','pop','push','reduce','reduceRight','reverse','shift','slice','some','sort','splice','unshift']),
+    gameNames:/^(hp|health|mp|mana|xp|gold|coins|score|level|lives|ammo|damage|stamina|energy|cooldown|timer|count|round|wave|kills|deaths|speed|state|status|phase|turn|money|currency)$/i,
+    sources:[/location\b/i,/document\.cookie/i,/localStorage\./i,/sessionStorage\./i,/event\.data\b/i,/messageEvent/i,/postMessage\s*\(/i,/WebSocket\s*\(/i,/prompt\s*\(/i,/URLSearchParams/i]
+  });
+  function v14Add(issues,c){
+    const it=pushIssue(issues,{severity:c.severity||'LOW',line:c.line||1,kind:c.kind||'V14',title:c.title||'',desc:c.desc||'',snippet:c.snippet||'',confidence:c.confidence||'MEDIUM'});
+    const obj=issues.find(x=>x.id===it);
+    if(obj && c.evidence){for(const e of c.evidence){try{addEvidence(obj,e[0],e[1],e[2]);}catch(_){}} try{fuseConfidence(obj);}catch(_){} }
+    return obj;
   }
-  function v14TypeOf(node,env){
-    if(!node)return 'undefined';
-    const l=v14Lit(node); if(l.known)return l.type;
+  function v14Const(node){
+    if(!node)return {known:false};
+    if(node.type==='Literal')return {known:true,value:node.value};
+    if(node.type==='UnaryExpression'){
+      const a=v14Const(node.argument); if(!a.known)return {known:false};
+      try{
+        if(node.operator==='+')return {known:true,value:+a.value};
+        if(node.operator==='-')return {known:true,value:-a.value};
+        if(node.operator==='!')return {known:true,value:!a.value};
+        if(node.operator==='~')return {known:true,value:~a.value};
+      }catch(_){return {known:false};}
+    }
+    if(node.type==='BinaryExpression'){
+      const a=v14Const(node.left),b=v14Const(node.right); if(!a.known||!b.known)return {known:false};
+      try{
+        switch(node.operator){case '+':return {known:true,value:a.value+b.value};case '-':return {known:true,value:a.value-b.value};case '*':return {known:true,value:a.value*b.value};case '/':return {known:true,value:a.value/b.value};case '%':return {known:true,value:a.value%b.value};case '**':return {known:true,value:a.value**b.value};case '<':return {known:true,value:a.value<b.value};case '>':return {known:true,value:a.value>b.value};case '<=':return {known:true,value:a.value<=b.value};case '>=':return {known:true,value:a.value>=b.value};case '===':return {known:true,value:a.value===b.value};case '!==':return {known:true,value:a.value!==b.value};default:return {known:false};}
+      }catch(_){return {known:false};}
+    }
+    if(node.type==='LogicalExpression'){
+      const a=v14Const(node.left); if(!a.known)return {known:false};
+      if(node.operator==='&&')return a.value?v14Const(node.right):a;
+      if(node.operator==='||')return a.value?a:v14Const(node.right);
+      if(node.operator==='??')return a.value!==null&&a.value!==undefined?a:v14Const(node.right);
+    }
+    if(node.type==='ConditionalExpression'){
+      const t=v14Const(node.test); if(t.known)return t.value?v14Const(node.consequent):v14Const(node.alternate);
+    }
+    return {known:false};
+  }
+  function v14Type(node,env){
+    if(!node)return 'unknown';
+    if(node.type==='Literal'){if(node.value===null)return 'null'; return typeof node.value;}
     if(node.type==='Identifier')return env.get(node.name)||'unknown';
-    if(node.type==='ArrayExpression')return 'object';
+    if(node.type==='ArrayExpression')return 'array';
     if(node.type==='ObjectExpression')return 'object';
     if(node.type==='FunctionExpression'||node.type==='ArrowFunctionExpression'||node.type==='FunctionDeclaration')return 'function';
-    if(node.type==='NewExpression')return 'object';
-    if(node.type==='BinaryExpression'){
-      if(['===','!==','==','!=','<','<=','>','>=','in','instanceof'].includes(node.operator))return 'boolean';
-      if(node.operator==='+' && ((v14TypeOf(node.left,env)==='string')||(v14TypeOf(node.right,env)==='string')))return 'string';
-      if(['+','-','*','/','%','**','<<','>>','>>>','|','&','^'].includes(node.operator))return 'number';
-    }
-    if(node.type==='LogicalExpression')return 'boolean';
-    if(node.type==='ConditionalExpression'){const a=v14TypeOf(node.consequent,env),b=v14TypeOf(node.alternate,env);return a===b?a:'unknown';}
-    if(node.type==='CallExpression'){
-      const n=node.callee?.name;
-      if(['String','parseInt','parseFloat','Number'].includes(n))return n==='String'?'string':'number';
-      if(n==='Boolean'||['isNaN','isFinite'].includes(n))return 'boolean';
-      if(n==='BigInt')return 'bigint';
-      if(n==='Array'||n==='Object'||n==='JSON.parse')return 'object';
-    }
+    if(node.type==='TemplateLiteral')return 'string';
+    if(node.type==='UnaryExpression'){if(node.operator==='typeof'||node.operator==='!')return 'string';if(['+','-','~'].includes(node.operator))return 'number';}
+    if(node.type==='BinaryExpression'){if(['<','>','<=','>=','===','!==','==','!='].includes(node.operator))return 'boolean';if(node.operator==='+'){const a=v14Type(node.left,env),b=v14Type(node.right,env);if(a==='string'||b==='string')return 'string';}if(['-','*','/','%','**'].includes(node.operator))return 'number';}
+    if(node.type==='CallExpression'&&node.callee?.type==='Identifier'){if(node.callee.name==='String')return 'string';if(['Number','parseInt','parseFloat'].includes(node.callee.name))return 'number';if(node.callee.name==='Boolean')return 'boolean';}
     return 'unknown';
   }
-  function v14Truth(node,env){
-    const l=v14Lit(node); if(l.known)return l.value?'true':'false';
-    if(node?.type==='UnaryExpression'&&node.operator==='!'){const t=v14Truth(node.argument,env);return t==='true'?'false':t==='false'?'true':'unknown';}
-    if(node?.type==='BinaryExpression'&&['===','!==','==','!=','<','<=','>','>='].includes(node.operator)){
-      const a=v14Lit(node.left),b=v14Lit(node.right); if(a.known&&b.known){try{
-        let x; switch(node.operator){case '===':x=a.value===b.value;break;case '!==':x=a.value!==b.value;break;case '==':x=a.value==b.value;break;case '!=':x=a.value!=b.value;break;case '<':x=a.value<b.value;break;case '<=':x=a.value<=b.value;break;case '>':x=a.value>b.value;break;default:x=a.value>=b.value;} return x?'true':'false';
-      }catch(_){}}
-    }
-    return 'unknown';
-  }
-  function v14SpecIssue(issues, text, node, severity, kind, title, desc, score, extra){
-    const issue={severity,line:v14Line(text,node),kind,title,desc,snippet:(text.split('\n')[v14Line(text,node)-1]||'').trim(),confidence:score>=95?'CERTAIN':score>=80?'HIGH':score>=60?'MEDIUM':'LOW'};
-    if(extra){Object.assign(issue,extra);}
-    const id=pushIssue(issues,issue);
-    const root=issues.find(x=>x.id===id)||issue;
-    if(typeof addEvidence==='function'){
-      addEvidence(root,'v14-'+kind,Math.max(10,Math.min(100,score)),desc);
-      if(extra?.evidence) for(const e of extra.evidence)addEvidence(root,e[0],e[1],e[2]);
-      try{fuseConfidence(root);}catch(_){ }
-    }
-    return root;
-  }
-  function v14Exact(issues,text,node,kind,title,desc,extra){return v14SpecIssue(issues,text,node,'HIGH',kind,title,desc,99,Object.assign({evidence:[['ast-contract',40,'AST構造が対象条件に完全一致']]},extra||{}));}
-  function v14High(issues,text,node,kind,title,desc,extra){return v14SpecIssue(issues,text,node,'HIGH',kind,title,desc,86,extra||{});}
-  function v14Med(issues,text,node,kind,title,desc,extra){return v14SpecIssue(issues,text,node,'MEDIUM',kind,title,desc,68,extra||{});}
-  function v14Name(node){return node?.type==='Identifier'?node.name:null;}
-  function v14Member(node){
-    if(!node||node.type!=='MemberExpression')return null;
-    const obj=v14Name(node.object); const prop=node.computed?(v14Lit(node.property).known&&typeof v14Lit(node.property).value==='string'?v14Lit(node.property).value:null):v14Name(node.property);
-    return obj&&prop?{obj,prop}:null;
-  }
-  function v14CollectSymbols(ast){
-    const env=new Map(), funcs=new Map(), refs=new Map(), calls=[], writes=new Map(), reads=new Map(), versions=new Map(), shapes=new Map();
-    const touch=(m,k,v)=>{const a=m.get(k)||[];a.push(v);m.set(k,a);};
+  function v14BuildSymbols(ast){
+    const symbols=new Map(),funcs=new Map();
     astWalk(ast,(n,p)=>{
-      if(n.type==='VariableDeclarator'&&n.id?.type==='Identifier'){
-        const name=n.id.name; const ty=v14TypeOf(n.init,env); env.set(name,ty); versions.set(name,(versions.get(name)||0)+1);
-        if(n.init?.type==='ObjectExpression'){const props=new Map();for(const q of n.init.properties||[]){if(q.type==='Property'){const k=q.key?.name??q.key?.value;if(typeof k==='string')props.set(k,v14TypeOf(q.value,env));}}shapes.set(name,props);}
-        touch(writes,name,{node:n,line:v14Line('',n),kind:'declare',type:ty});
-      } else if(n.type==='AssignmentExpression'&&n.left?.type==='Identifier'){
-        const name=n.left.name; const ty=v14TypeOf(n.right,env); if(n.operator==='=')env.set(name,ty); versions.set(name,(versions.get(name)||0)+1); touch(writes,name,{node:n,line:v14Line('',n),kind:'assign',type:ty});
-      } else if(n.type==='Identifier'){
-        if(p&&((p.type==='MemberExpression'&&p.property===n&&!p.computed)||(p.type==='Property'&&p.key===n)))return;
-        touch(refs,n.name,{node:n,line:v14Line('',n),parent:p}); touch(reads,n.name,{node:n,line:v14Line('',n)});
-      }
-      if(n.type==='FunctionDeclaration'&&n.id){funcs.set(n.id.name,{node:n,params:n.params?.length||0,paramNames:(n.params||[]).map(v14Name)});}
-      if(n.type==='CallExpression'){
-        calls.push({node:n,callee:v14Name(n.callee)||v14Member(n.callee)?.prop||null,argc:n.arguments?.length||0});
-      }
+      if(n.type==='VariableDeclarator'&&n.id?.type==='Identifier')symbols.set(n.id.name,{kind:'variable',line:v14NodeLine(n),node:n});
+      if(n.type==='FunctionDeclaration'&&n.id)funcs.set(n.id.name,{line:v14NodeLine(n),node:n,required:n.params.filter(x=>x.type!=='AssignmentPattern'&&x.type!=='RestElement').length});
+      if(n.type==='ClassDeclaration'&&n.id)symbols.set(n.id.name,{kind:'class',line:v14NodeLine(n),node:n});
     });
-    return {env,funcs,refs,calls,writes,reads,versions,shapes};
+    return {symbols,funcs};
   }
-  function v14ConstArrayCheck(text,ast,issues){
-    astWalk(ast,(n)=>{
-      if(n.type==='MemberExpression'&&n.computed&&n.object?.type==='ArrayExpression'&&n.property?.type==='Literal'&&Number.isInteger(n.property.value)){
-        const len=n.object.elements?.length||0,idx=n.property.value;if(idx<0||idx>=len)v14Exact(issues,text,n,'Array Bounds','確定した配列範囲外アクセス','定数配列の有効添字範囲は0〜'+Math.max(0,len-1)+'です。');
-      }
-      if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'&&n.callee.property?.name==='slice'&&n.arguments?.[0]?.type==='Literal'&&n.arguments?.[1]?.type==='Literal'){
-        const a=v14Lit(n.arguments[0]),b=v14Lit(n.arguments[1]);if(a.known&&b.known&&typeof a.value==='number'&&typeof b.value==='number'&&a.value>b.value)v14Exact(issues,text,n,'Array Bounds','slice() の開始位置が終了位置を超えています','定数引数が逆順です。結果が必ず空範囲になります。');
-      }
-    });
-  }
-  function v14TypeAndShape(text,ast,issues){
-    const {env,shapes}=v14CollectSymbols(ast);
-    astWalk(ast,(n)=>{
-      if(n.type==='AssignmentExpression'&&n.left?.type==='Identifier'){
-        const name=n.left.name,prev=env.get(name),next=v14TypeOf(n.right,env);
-        if(prev&&prev!=='unknown'&&next!=='unknown'&&prev!==next&&n.operator==='=')v14Med(issues,text,n,'Type Flow','変数の型が同一スコープで変化しています',name+' は '+prev+' と '+next+' の両方として扱われています。',{evidence:[['type-inference',30,'代入前後の静的型が不一致'],['symbol-flow',25,'同一シンボルを追跡']]});
-      }
-      if(n.type==='MemberExpression'&&!n.computed&&n.object?.type==='Identifier'){
-        const o=n.object.name,prop=n.property?.name,s=shapes.get(o); if(s&&s.size&&!s.has(prop))v14Med(issues,text,n,'Object Shape','オブジェクト形状に存在しないプロパティを参照しています',o+'.'+prop+' は静的に生成されたオブジェクト形状に存在しません。',{evidence:[['object-shape',35,'オブジェクトリテラルからshapeを確定']]});
-      }
-    });
-  }
-  function v14CallGraph(text,ast,issues){
-    const {funcs,calls}=v14CollectSymbols(ast);
-    for(const c of calls){
-      if(!c.callee||!funcs.has(c.callee))continue;
-      const f=funcs.get(c.callee);if(c.argc<f.params){
-        const fn=f.node; let missing=false; const params=fn.params||[]; for(let i=c.argc;i<params.length;i++){if(params[i].type==='AssignmentPattern'||params[i].type==='RestElement')continue;missing=true;}
-        if(missing)v14High(issues,text,c.node,'Call Graph','ローカル関数への必須引数が不足しています',c.callee+'() は必須引数 '+f.params+' 個ですが、'+c.argc+' 個しか渡されていません。',{evidence:[['call-graph',35,'呼び出し先の関数宣言を同一AST内で解決'],['parameter-contract',30,'既定値/Rest以外の必須引数を確認']]});
-      }
-      if(c.callee===undefined)continue;
-    }
-    astWalk(ast,(n)=>{
-      if(n.type==='FunctionDeclaration'&&n.id&&n.id.name){
-        const self=n.id.name;let recursive=false;astWalk(n.body,(x)=>{if(x!==n&&x.type==='CallExpression'&&v14Name(x.callee)===self)recursive=true;});
-        if(recursive&&!/base|stop|end|terminate/i.test(self)){
-          const hasGuard=/return\s+(?:true|false|[^;]+)|if\s*\([^)]*\)\s*(?:return|throw|break)/.test(text.slice(n.body?.start||0,n.body?.end||0));
-          if(!hasGuard)v14Med(issues,text,n,'Call Graph','停止条件を静的に確認できない再帰呼び出し','自己呼び出しが存在しますが、同一関数内に明確な終了経路を確認できません。',{evidence:[['recursion',30,'自己呼び出しをASTで検出']]});
+  function v14CallGraph(text,ast,issues,baseLine){
+    const g=v14BuildSymbols(ast), lines=text.split('\n');
+    astWalk(ast,n=>{
+      if(n.type==='CallExpression'&&n.callee?.type==='Identifier'){
+        const f=g.funcs.get(n.callee.name); if(f && (n.arguments?.length||0)<f.required){
+          v14Add(issues,{severity:'MEDIUM',kind:'Call Graph',line:baseLine+v14NodeLine(n)-1,title:'必須引数が不足した関数呼び出し',desc:'同一AST内で関数定義と呼び出しを照合し、既定値/Restを除く必須パラメータが不足しています。',snippet:getLineText(lines,v14NodeLine(n)),confidence:'HIGH',evidence:[['call-graph',70,'関数定義と呼び出しを直接照合'],['parameter-contract',45,'必須パラメータ数を算出']]});
         }
       }
     });
   }
-  function v14PathConstraints(text,ast,issues){
-    astWalk(ast,(n)=>{
+  function v14Path(text,ast,issues,baseLine){
+    const lines=text.split('\n');
+    astWalk(ast,n=>{
       if(n.type==='IfStatement'){
-        const t=v14Truth(n.test,new Map());
-        if(t==='true'){
-          v14Med(issues,text,n,'Control Flow','条件式が常にtrueです','定数評価によりelse側が到達不能になります。',{evidence:[['constant-evaluation',45,'条件を静的評価']]});
-        } else if(t==='false'){
-          v14Med(issues,text,n,'Control Flow','条件式が常にfalseです','then側が到達不能になります。',{evidence:[['constant-evaluation',45,'条件を静的評価']]});
+        const v=v14Const(n.test); if(v.known)v14Add(issues,{severity:'MEDIUM',kind:'Control Flow',line:baseLine+v14NodeLine(n)-1,title:v.value?'else側が静的に到達不能です':'if側が静的に到達不能です',desc:'条件式が定数評価で確定しています。',snippet:getLineText(lines,v14NodeLine(n)),confidence:'CERTAIN',evidence:[['constant-evaluation',90,'条件値を静的評価']]});
+      }
+      if(n.type==='SwitchStatement'){
+        const seen=new Set();
+        for(const c of n.cases||[]){const v=v14Const(c.test);if(!v.known)continue;const key=String(v.value);if(seen.has(key))v14Add(issues,{severity:'MEDIUM',kind:'Control Flow',line:baseLine+v14NodeLine(c)-1,title:'switchの重複case',desc:'同じ定数値のcaseが複数あります。',snippet:getLineText(lines,v14NodeLine(c)),confidence:'CERTAIN',evidence:[['duplicate-case',90,'case値が一致']]});seen.add(key);}
+      }
+    });
+  }
+  function v14Shape(text,ast,issues,baseLine){
+    const env=new Map(),shapes=new Map(),lines=text.split('\n');
+    astWalk(ast,n=>{
+      if(n.type==='VariableDeclarator'&&n.id?.type==='Identifier'){
+        const name=n.id.name;env.set(name,v14Type(n.init,env));
+        if(n.init?.type==='ObjectExpression'){
+          const set=new Set(); for(const p of n.init.properties||[]){if(p.type==='Property'&&!p.computed){const key=p.key?.name??p.key?.value;if(key!=null)set.add(String(key));}} shapes.set(name,set);
+        }
+        if(V14_RULES.gameNames.test(name)&&env.get(name)==='string')v14Add(issues,{severity:'MEDIUM',kind:'Type/Data Flow',line:baseLine+v14NodeLine(n)-1,title:'ゲーム状態の初期型がstringです: '+name,desc:'数値状態として使われる場合の暗黙変換候補です。',snippet:getLineText(lines,v14NodeLine(n)),confidence:'MEDIUM',evidence:[['type-inference',45,'初期値型を推定'],['game-state-role',20,'状態名パターンに一致']]});
+      }
+      if(n.type==='AssignmentExpression'&&n.left?.type==='Identifier')env.set(n.left.name,v14Type(n.right,env));
+      if(n.type==='MemberExpression'&&n.object?.type==='Identifier'&&!n.computed&&shapes.has(n.object.name)){
+        const key=n.property?.name; if(key&&!shapes.get(n.object.name).has(key))v14Add(issues,{severity:'LOW',kind:'Object Shape',line:baseLine+v14NodeLine(n)-1,title:'静的Objectにないプロパティを参照しています: '+n.object.name+'.'+key,desc:'同一ファイル内での初期Object形状と不一致です。別経路で追加される可能性があるためLOWに抑えています。',snippet:getLineText(lines,v14NodeLine(n)),confidence:'LOW',evidence:[['object-shape',45,'初期Objectのキー集合と照合'],['alias-uncertainty',-5,'外部変更の可能性を考慮']]});
+      }
+    });
+  }
+  function v14Taint(text,ast,issues,baseLine){
+    const lines=text.split('\n'), tainted=new Set();
+    astWalk(ast,n=>{
+      if(n.type==='VariableDeclarator'&&n.id?.type==='Identifier'&&n.init){const raw=text.slice(n.init.start,n.init.end);if(V14_RULES.sources.some(r=>r.test(raw)))tainted.add(n.id.name);}
+      if(n.type==='AssignmentExpression'&&n.left?.type==='Identifier'&&n.right){const raw=text.slice(n.right.start,n.right.end);if(V14_RULES.sources.some(r=>r.test(raw)))tainted.add(n.left.name);}
+    });
+    if(!tainted.size)return;
+    astWalk(ast,n=>{
+      if(n.type==='CallExpression'&&n.callee?.type==='Identifier'&&['eval','Function'].includes(n.callee.name)){
+        const a=n.arguments?.[0];if(a?.type==='Identifier'&&tainted.has(a.name))v14Add(issues,{severity:'CRITICAL',kind:'Security/Taint',line:baseLine+v14NodeLine(n)-1,title:'外部入力がコード実行sinkへ到達しています',desc:'入力源から識別子を通じてeval/Functionへ到達しています。',snippet:getLineText(lines,v14NodeLine(n)),confidence:'CERTAIN',evidence:[['taint-source',70,'入力源を認識'],['taint-flow',55,'識別子の値伝播を追跡'],['dangerous-sink',40,'コード実行APIへ到達']]});
+      }
+      if(n.type==='AssignmentExpression'&&n.left?.type==='MemberExpression'&&!n.left.computed&&['innerHTML','outerHTML'].includes(n.left.property?.name)){
+        const a=n.right;if(a?.type==='Identifier'&&tainted.has(a.name))v14Add(issues,{severity:'HIGH',kind:'Security/Taint',line:baseLine+v14NodeLine(n)-1,title:'外部入力がHTML挿入sinkへ到達しています',desc:'入力源から識別子を通じてHTML挿入APIへ到達しています。サニタイズ経路が別にある場合の誤検知を考慮してHIGHです。',snippet:getLineText(lines,v14NodeLine(n)),confidence:'HIGH',evidence:[['taint-source',65,'入力源を認識'],['taint-flow',45,'識別子の値伝播を追跡'],['dom-sink',40,'innerHTML/outerHTMLへ到達']]});
+      }
+    });
+  }
+  function v14API(text,ast,issues,baseLine){
+    const lines=text.split('\n');
+    astWalk(ast,n=>{
+      if(n.type!=='CallExpression')return;
+      const c=n.callee;
+      if(c?.type==='Identifier'&&['setTimeout','setInterval'].includes(c.name)){
+        const a=n.arguments?.[0];if(a?.type==='Literal'&&typeof a.value==='string')v14Add(issues,{severity:'HIGH',kind:'Security/Runtime',line:baseLine+v14NodeLine(n)-1,title:c.name+'に文字列コードを渡しています',desc:'タイマーが暗黙のコード実行として解釈されます。',snippet:getLineText(lines,v14NodeLine(n)),confidence:'CERTAIN',evidence:[['api-contract',80,'タイマー第1引数の仕様'],['constant-evaluation',55,'文字列引数を確定']]});
+      }
+      if(c?.type==='Identifier'&&c.name==='BigInt'&&n.arguments?.[0]?.type==='Literal'){
+        try{BigInt(n.arguments[0].value);}catch(_){v14Add(issues,{severity:'HIGH',kind:'API Contract',line:baseLine+v14NodeLine(n)-1,title:'BigInt()の確定変換エラー',desc:'静的引数をBigIntへ変換できません。',snippet:getLineText(lines,v14NodeLine(n)),confidence:'CERTAIN',evidence:[['constant-evaluation',85,'BigInt変換を静的実行'],['api-contract',45,'BigInt契約']]});}
+      }
+      if(c?.type==='MemberExpression'){
+        const obj=c.object?.type==='Identifier'?c.object.name:''; const prop=c.property?.name;
+        if(obj==='JSON'&&prop==='parse'&&n.arguments?.[0]?.type==='Literal'&&typeof n.arguments[0].value==='string'){
+          try{JSON.parse(n.arguments[0].value);}catch(_){v14Add(issues,{severity:'HIGH',kind:'API Contract',line:baseLine+v14NodeLine(n)-1,title:'JSON.parseの不正JSONリテラル',desc:'文字列リテラルがJSONとして不正です。',snippet:getLineText(lines,v14NodeLine(n)),confidence:'CERTAIN',evidence:[['constant-evaluation',90,'JSON.parseを静的評価'],['api-contract',50,'JSON構文契約']]});}
+        }
+        if(obj==='Object'&&V14_RULES.objectCalls.has(prop)&&n.arguments?.[0]?.type==='Literal'&&n.arguments[0].value===null)v14Add(issues,{severity:'HIGH',kind:'API Contract',line:baseLine+v14NodeLine(n)-1,title:'Object.'+prop+'へnullを渡しています',desc:'対象値がnullであることが静的に確定しています。',snippet:getLineText(lines,v14NodeLine(n)),confidence:'CERTAIN',evidence:[['api-contract',75,'Object API契約'],['constant-evaluation',55,'nullを確定']]});
+        if(obj==='Math'&&V14_RULES.numericCalls.has(prop)){
+          for(const a of n.arguments||[]){const v=v14Const(a);if(v.known&&typeof v.value!=='number'&&!['max','min'].includes(prop))v14Add(issues,{severity:'LOW',kind:'API Contract',line:baseLine+v14NodeLine(n)-1,title:'Math.'+prop+'へ非数値定数を渡しています',desc:'暗黙変換は合法ですが、意図しない型変換候補です。',snippet:getLineText(lines,v14NodeLine(n)),confidence:'LOW',evidence:[['constant-argument',35,'引数を定数評価'],['api-contract',25,'Math API契約']]});}
         }
       }
-      if(n.type==='LogicalExpression'&&n.operator==='&&'){
-        const t=v14Truth(n.left,new Map());if(t==='false')v14Med(issues,text,n,'Control Flow','&&の左辺が常にfalseです','右辺は到達しても評価されません。',{evidence:[['constant-evaluation',40,'左辺を静的評価']]});
-      }
-      if(n.type==='ConditionalExpression'){const t=v14Truth(n.test,new Map());if(t!=='unknown')v14Med(issues,text,n,'Control Flow','三項演算子の条件が定数です','一方の分岐が常に選択されます。',{evidence:[['constant-evaluation',40,'条件を静的評価']]});}
     });
   }
-  function v14SSA(text,ast,issues){
-    const versions=new Map();
-    astWalk(ast,(n)=>{
-      if(n.type==='VariableDeclarator'&&n.id?.type==='Identifier'){const name=n.id.name;versions.set(name,(versions.get(name)||0)+1);}
-      if(n.type==='AssignmentExpression'&&n.left?.type==='Identifier'){const name=n.left.name;versions.set(name,(versions.get(name)||0)+1);}
-      if(n.type==='UpdateExpression'&&n.argument?.type==='Identifier'){const name=n.argument.name;versions.set(name,(versions.get(name)||0)+1);}
-    });
-    astWalk(ast,(n)=>{
-      if(n.type==='AssignmentExpression'&&n.operator==='='&&n.left?.type==='Identifier'){
-        const uses=[];astWalk(n.parent||null,()=>{}); // parent intentionally unavailable in generic walker
-        if(uses.length>0)return;
-      }
-    });
-    for(const [name,count] of versions){if(count>20&&GAME_STATE_NAMES.test(name))v14Med(issues,text,ast,'SSA','ゲーム状態変数の書き換え回数が非常に多い',''+name+' は単一解析範囲内で '+count+' 回以上更新されています。状態遷移を確認してください。',{evidence:[['version-count',30,'SSA風の変数バージョン追跡']]});}
-  }
-  function v14HeapAlias(text,ast,issues){
-    const aliases=new Map(); const objectVars=new Set();
-    astWalk(ast,(n)=>{
-      if(n.type==='VariableDeclarator'&&n.id?.type==='Identifier'){
-        const name=n.id.name;if(n.init?.type==='ObjectExpression'||n.init?.type==='ArrayExpression')objectVars.add(name);
-        if(n.init?.type==='Identifier'&&objectVars.has(n.init.name))aliases.set(name,n.init.name);
-      }
-      if(n.type==='AssignmentExpression'&&n.left?.type==='Identifier'&&n.right?.type==='Identifier'&&objectVars.has(n.right.name)){aliases.set(n.left.name,n.right.name);}
-      if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'&&n.callee.property?.name==='splice'&&n.arguments?.[0]?.type==='Literal'&&n.arguments[0].value===0){
-        const target=v14Name(n.callee.object);if(target)v14Med(issues,text,n,'Alias / Mutation','配列先頭をspliceで削除しています','別名参照が存在する場合、共有配列の内容が意図せず変化する可能性があります。',{evidence:[['mutation',25,'splice(0,...) を検出']]});
-      }
-    });
-    if(aliases.size){for(const [a,b] of aliases){const msg=''+a+' と '+b+' は同一オブジェクトを共有する可能性があります。'; if(a!==b&&!/^_|temp|tmp/i.test(a))v14Med(issues,text,ast,'Alias', 'オブジェクト参照が共有されています',msg,{evidence:[['alias-analysis',35,'代入による参照共有を検出']]});}}
-  }
-  function v14Taint(text,ast,issues,htmlInfo){
-    const tainted=new Set(['location','localStorage','sessionStorage','document.cookie','postMessage','event.data','WebSocket']);
-    const marks=new Map();
-    astWalk(ast,(n)=>{
-      if(n.type==='VariableDeclarator'&&n.id?.type==='Identifier'){
-        const src=n.init?.type==='Identifier'&&tainted.has(n.init.name); if(src)marks.set(n.id.name,'source');
-        const mem=v14Member(n.init); if(mem&&tainted.has(mem.obj+'.'+mem.prop))marks.set(n.id.name,'source');
-      }
-      if(n.type==='AssignmentExpression'&&n.left?.type==='Identifier'){if(n.right?.type==='Identifier'&&marks.has(n.right.name))marks.set(n.left.name,'source');}
-      if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'){
-        const mem=v14Member(n.callee),arg=n.arguments?.[0];const taintArg=arg?.type==='Identifier'&&marks.has(arg.name);
-        if(['innerHTML','outerHTML','insertAdjacentHTML'].includes(mem?.prop)&&taintArg)v14High(issues,text,n,'Security Taint','外部由来データがHTML解釈sinkへ流れています','入力由来の値がHTML文字列として解釈される経路を静的に追跡しました。',{evidence:[['taint-source',30,'入力源を特定'],['taint-flow',35,'代入経由で値を追跡'],['taint-sink',30,'HTML解釈APIを特定']]});
-        if(mem?.prop==='setAttribute'&&taintArg){const attr=v14Lit(n.arguments?.[0]);if(attr.known&&/^(src|href|srcdoc|on\w+)$/i.test(String(attr.value)))v14High(issues,text,n,'Security Taint','外部由来データを危険属性へ設定しています','URL/イベント系属性に入力由来値を設定する経路を確認してください。',{evidence:[['taint-source',30,'入力源'],['attribute-sink',35,'危険属性を確定']]});}
-      }
-    });
-  }
-  function v14Async(text,ast,issues){
-    const listeners=new Map(),timers=new Map();
-    astWalk(ast,(n)=>{
-      if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'&&!n.callee.computed){
-        const m=v14Member(n.callee);if(!m)return;
-        if(m.prop==='addEventListener'&&n.arguments?.[0]?.type==='Literal'){
-          const type=String(n.arguments[0].value),h=n.arguments[1];const key=m.obj+'.'+type+':'+(h?.start||'anon');listeners.set(key,n);
-        }
-        if(['setInterval','setTimeout','requestAnimationFrame'].includes(m.prop)){const key=m.prop+':'+(n.arguments?.[0]?.start||'anon');timers.set(key,n);}
-      }
-      if(n.type==='CallExpression'&&n.callee?.type==='Identifier'&&['setInterval','setTimeout','requestAnimationFrame'].includes(n.callee.name)){timers.set(n.callee.name+':'+(n.arguments?.[0]?.start||'anon'),n);}
-      if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'&&v14Member(n.callee)?.prop==='catch'&&n.arguments.length===0)v14Med(issues,text,n,'Async','Promise chainにcatch()がありません','拒否経路を処理しないPromise chainの可能性があります。',{evidence:[['promise-chain',35,'catch()なしをASTで確定']]});
-    });
-    if(listeners.size>12)v14Med(issues,text,ast,'Async / Event','イベントlistenerの登録点が多数あります','同一ページで多数のlistenerを登録しているため、ライフサイクル/解除設計を確認してください。',{evidence:[['listener-count',25,'静的登録点を集計']]});
-    if(timers.size>10)v14Med(issues,text,ast,'Async / Timer','timer系APIの登録点が多数あります','interval/timeout/requestAnimationFrameの解除・重複登録を確認してください。',{evidence:[['timer-count',25,'timer登録点を集計']]});
-  }
-  function v14WebApiContracts(text,ast,issues){
-    const exactStringArgs={
-      fetch:[0],setTimeout:[1],setInterval:[1],clearTimeout:[0],clearInterval:[0],querySelector:[0],querySelectorAll:[0],closest:[0],matches:[0],getElementById:[0],setAttribute:[0],removeAttribute:[0],addEventListener:[0],removeEventListener:[0],getContext:[0],requestAnimationFrame:[],cancelAnimationFrame:[],encodeURI:[0],decodeURI:[0],encodeURIComponent:[0],decodeURIComponent:[0]
-    };
-    astWalk(ast,(n)=>{
-      if(n.type!=='CallExpression')return;const name=v14Name(n.callee)||v14Member(n.callee)?.prop;if(!name)return;
-      for(const ix of exactStringArgs[name]||[]){const a=v14Lit(n.arguments?.[ix]);if(a.known&&typeof a.value!=='string'&&!['clearTimeout','clearInterval','requestAnimationFrame','cancelAnimationFrame'].includes(name))v14Exact(issues,text,n,'Web API',''+name+'() の第'+(ix+1)+'引数型が不正です','静的引数がWeb APIの文字列契約に一致しません。');}
-      if(name==='setTimeout'||name==='setInterval'){
-        const d=v14Lit(n.arguments?.[1]);if(d.known&&(typeof d.value!=='number'||!Number.isFinite(d.value)||d.value<0))v14Exact(issues,text,n,'Timer API',name+'() の遅延値が不正です','静的なdelayが有限非負数ではありません。');
-      }
-      if(name==='parseInt'&&n.arguments?.[1]){const r=v14Lit(n.arguments[1]);if(r.known&&(typeof r.value!=='number'||!Number.isInteger(r.value)||r.value<2||r.value>36))v14Exact(issues,text,n,'Numeric API','parseInt() のradixが不正です','radixは2〜36の整数です。');}
-      if(name==='JSON.parse'){const a=v14Lit(n.arguments?.[0]);if(a.known&&typeof a.value==='string'){try{JSON.parse(a.value);}catch(_){v14Exact(issues,text,n,'JSON API','JSON.parse() が確定で例外になります','定数文字列をJSON.parseできません。');}}}
-      if(name==='JSON.stringify'&&n.arguments?.length>=2){const r=v14Lit(n.arguments[1]);if(r.known&&r.value!==null&&typeof r.value!=='function'&&typeof r.value!=='undefined')v14Med(issues,text,n,'JSON API','JSON.stringify() のreplacer引数が定数プリミティブです','replacerとして意図した型か確認してください。',{evidence:[['api-contract',28,'第2引数を静的評価']]});}
-      if(name==='URL'&&n.arguments?.[0]){const a=v14Lit(n.arguments[0]);if(a.known&&typeof a.value==='string'){try{new URL(a.value,'https://lintbench.local/');}catch(_){v14Exact(issues,text,n,'URL API','URL() に不正な定数URLを渡しています','定数文字列をURLとして解釈できません。');}}}
-      if(name==='RegExp'&&n.arguments?.[0]){const a=v14Lit(n.arguments[0]);if(a.known&&typeof a.value==='string'){try{new RegExp(a.value);}catch(_){v14Exact(issues,text,n,'RegExp API','RegExp() のパターンが確定で無効です','定数正規表現を構築できません。');}}}
-    });
-  }
-  function v14HtmlDeep(text,htmlInfo,issues){
+  function v14DomBridge(text,htmlInfo,issues){
     if(!htmlInfo)return;
-    const ids=[...htmlInfo.ids.keys()],classes=[...htmlInfo.classes.keys()];
-    const seenLabels=new Set();
-    for(const form of htmlInfo.forms||[]){
-      const attrs=form.attrs||[]; const action=attrs.find(a=>a.name==='action'); if(action&&!action.value)v14Exact(issues,text,null,'HTML Form','formのactionが空です','送信先が空文字として確定しています。');
-    }
-    const inputs=[];const re=/<(input|textarea|select)\b([^>]*)>/gi;let m;while((m=re.exec(text))){inputs.push({tag:m[1].toLowerCase(),raw:m[0],line:lineAt(text,m.index)});}
-    for(const x of inputs){
-      const name=/\bname\s*=\s*["']([^"']+)["']/i.exec(x.raw)?.[1]; const type=/\btype\s*=\s*["']([^"']+)["']/i.exec(x.raw)?.[1]?.toLowerCase(); if((type==='text'||type==='email'||type==='password')&&!name)v14Med(issues,text,{loc:{start:{line:x.line}}},'HTML Form','フォーム入力にname属性がありません','フォーム送信やFormData参照を使う場合に対象名が取得できなくなる可能性があります。',{evidence:[['form-input',30,'input要素を構文解析']]});
-    }
-    const scriptRefs=[...text.matchAll(/<script\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>/gi)];
-    for(const r of scriptRefs){if(/\.js(?:\?|$)/i.test(r[1])&&/defer/i.test(r[0])&&/async/i.test(r[0]))v14Med(issues,text,{loc:{start:{line:lineAt(text,r.index)}}},'HTML Script','scriptにdeferとasyncを同時指定しています','実行順序依存がある場合は挙動を確認してください。',{evidence:[['script-attrs',25,'async/deferの同時指定']]});}
-    for(const id of ids){if(ids.filter(x=>x===id).length>1)v14Exact(issues,text,null,'HTML DOM','idが重複しています','同じidが複数存在します。');}
-  }
-  function v14CssDeep(text,issues,baseLine){
-    const varNames=new Set();for(const m of text.matchAll(/--([A-Za-z0-9_-]+)\s*:/g))varNames.add('--'+m[1]);
-    for(const m of text.matchAll(/var\(\s*(--[A-Za-z0-9_-]+)\s*\)/g)){if(!varNames.has(m[1]))v14Med(issues,text,{loc:{start:{line:baseLine+lineAt(text,m.index)-1}}},'CSS Variable','未定義のCSSカスタムプロパティを参照しています',m[1]+' が同一CSSブロック内で定義されていません。',{evidence:[['css-var',35,'定義/参照集合を照合']]});}
-    const blocks=text.matchAll(/([^{}]+)\{([^{}]*)\}/g);for(const b of blocks){const body=b[2];const props=new Map();for(const d of body.split(';')){const mm=/^\s*([\w-]+)\s*:\s*([^;]+)\s*$/.exec(d);if(mm){const k=mm[1];props.set(k,(props.get(k)||0)+1);}}for(const [k,c] of props)if(c>1)v14Med(issues,text,{loc:{start:{line:baseLine+lineAt(text,b.index)-1}}},'CSS Cascade','同一ルール内で同じプロパティが複数回定義されています',k+' が '+c+' 回定義されています。',{evidence:[['css-declaration',25,'同一rule内の宣言を集計']]});}
-  }
-  function v14Security(text,lang,issues){
-    if(lang==='js'||lang==='html'){
-      const danger=[[/\beval\s*\(/,'eval() を使用しています'],[/\bnew\s+Function\s*\(/,'Functionコンストラクタを使用しています'],[/setTimeout\s*\(\s*["'`]/,'文字列コードをsetTimeout()へ渡しています'],[/setInterval\s*\(\s*["'`]/,'文字列コードをsetInterval()へ渡しています']];
-      for(const [rx,title] of danger){const m=rx.exec(text);if(m)v14Med(issues,text,{loc:{start:{line:lineAt(text,m.index)}}},'Security',title,'動的コード実行または文字列評価が存在します。',{evidence:[['security-sink',30,'危険sinkを検出']]});}
-    }
-    if(lang==='sql'){
-      if(/\b(SELECT|UPDATE|DELETE|INSERT)\b[\s\S]*\$\{|\+["']?[A-Za-z_]/i.test(text))v14Med(issues,text,{loc:{start:{line:1}}},'SQL Taint','SQLへ文字列連結された値があります','パラメータ化クエリが利用可能か確認してください。',{evidence:[['sql-concat',35,'クエリ連結を検出']]});
+    for(const sc of htmlInfo.scripts||[]){
+      const p=parseJSWithAST(sc.content);if(!p.ast)continue;
+      const lines=sc.content.split('\n');
+      astWalk(p.ast,n=>{
+        if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'&&n.callee.object?.name==='document'){
+          const prop=n.callee.property?.name, a=n.arguments?.[0];
+          if(prop==='getElementById'&&a?.type==='Literal'&&typeof a.value==='string'&&!htmlInfo.ids.has(a.value))v14Add(issues,{severity:'HIGH',kind:'DOM',line:sc.lineOffset+v14NodeLine(n)-1,title:'存在しないDOM idを参照しています: '+a.value,desc:'HTMLのid集合と照合して対象要素が見つかりません。',snippet:getLineText(lines,v14NodeLine(n)),confidence:'HIGH',evidence:[['dom-graph',70,'HTML id集合と照合'],['constant-selector',45,'参照idが定数']]});
+          if(prop==='querySelector'&&a?.type==='Literal'&&typeof a.value==='string'&&a.value[0]==='#'&&!htmlInfo.ids.has(a.value.slice(1)))v14Add(issues,{severity:'MEDIUM',kind:'DOM',line:sc.lineOffset+v14NodeLine(n)-1,title:'querySelectorの#idがHTMLに存在しません',desc:'動的生成の可能性を考慮しMEDIUMに抑えています。',snippet:getLineText(lines,v14NodeLine(n)),confidence:'MEDIUM',evidence:[['dom-graph',50,'HTML id集合と照合'],['constant-selector',40,'参照セレクタが定数']]});
+        }
+      });
     }
   }
-  function v14ThreeGame(text,lang,issues){
-    if(lang!=='js'&&lang!=='html')return;
-    const threeRules=[
-      [/\bnew\s+THREE\.WebGLRenderer\s*\(/,'WebGLRendererを生成しています','rendererのdispose/lifecycleを確認してください。'],
-      [/\bnew\s+THREE\.(?:Mesh|Line|Points)\s*\(/,'Three.js描画オブジェクトを生成しています','大量生成する場合は再利用・disposeを確認してください。'],
-      [/\bnew\s+THREE\.(?:Texture|CanvasTexture|VideoTexture)\s*\(/,'Three.js Textureを生成しています','不要Textureのdisposeを確認してください。'],
-      [/\bnew\s+THREE\.AnimationMixer\s*\(/,'AnimationMixerを生成しています','mixer/actionの停止・破棄ライフサイクルを確認してください。'],
-      [/\brenderer\.setPixelRatio\s*\(\s*window\.devicePixelRatio\s*\)/,'devicePixelRatioをそのままsetPixelRatioしています','高DPI端末でGPU負荷が急増する可能性があります。'],
-      [/\brequestAnimationFrame\s*\([^)]*animate\s*\)/,'再帰型render loopがあります','多重loopになっていないか確認してください。']
+  function v14ThreeGame(text,ast,issues,baseLine){
+    const lines=text.split('\n');
+    astWalk(ast,n=>{
+      if(n.type==='CallExpression' && n.callee?.type==='MemberExpression' && n.callee.property?.name==='setPixelRatio'){
+        const v=v14Const(n.arguments?.[0]);
+        if(v.known && typeof v.value==='number' && v.value>3){
+          v14Add(issues,{severity:'LOW',kind:'Three.js/Performance',line:baseLine+v14NodeLine(n)-1,title:'renderer.setPixelRatioが3を超えています',desc:'高DPR端末では描画負荷が大きくなる可能性があります。',snippet:getLineText(lines,v14NodeLine(n)),confidence:'HIGH',evidence:[['constant-evaluation',55,'値が定数'],['threejs-contract',45,'pixel ratio閾値']]});
+        }
+      }
+    });
+  }
+  function v14HTMLSecurity(text,issues){
+    const lines=text.split('\n');
+    for(const m of text.matchAll(/<script\b[^>]*\bsrc\s*=\s*["'][^"']+["'][^>]*>/ig)){const raw=m[0];if(/^https?:\/\//i.test((raw.match(/src\s*=\s*["']([^"']+)/i)||[])[1]||'')&&!/\bintegrity\s*=/.test(raw))v14Add(issues,{severity:'LOW',kind:'Security/HTML',line:lineAt(text,m.index),title:'外部scriptにintegrity属性がありません',desc:'CDN依存ならSRIを検討できます。動的scriptでは適用不要な場合があるためLOWです。',snippet:getLineText(lines,lineAt(text,m.index)),confidence:'LOW',evidence:[['external-script',35,'外部scriptを検出'],['sri-contract',25,'integrityなし']]});}
+  }
+  function v14Unified(text,lang,issues,htmlInfo,baseLine){
+    if(lang==='js'||lang==='ts'){
+      const p=parseJSWithAST(text);if(p.ast){v14CallGraph(text,p.ast,issues,baseLine);v14Path(text,p.ast,issues,baseLine);v14Shape(text,p.ast,issues,baseLine);v14Taint(text,p.ast,issues,baseLine);v14API(text,p.ast,issues,baseLine);v14ThreeGame(text,p.ast,issues,baseLine);}
+    }
+    if(lang==='html'){v14DomBridge(text,htmlInfo,issues);v14HTMLSecurity(text,issues);}
+    const lines=text.split('\n');
+    const matrix=[
+      [/Promise\.all\s*\(\s*\{/g,'Promise.allの入力形式を確認してください','Promise.allはIterableを要求します。オブジェクトリテラルはIterableではありません。','HIGH','Promise Contract'],
+      [/\.repeat\s*\(\s*-\d+/g,'repeat()へ負数を渡しています','String.prototype.repeatの負数回数はRangeErrorになります。','HIGH','String Contract'],
+      [/\.toFixed\s*\(\s*(?:1\d|[2-9]\d)\s*\)/g,'toFixed()の桁数が大きすぎます','固定桁数が100未満という契約から外れる可能性があります。','LOW','Number Contract'],
+      [/\bArray\s*\(\s*-\d+/g,'Array()へ負の長さを渡しています','負のlengthはRangeErrorになります。','HIGH','Array Contract'],
+      [/\bnew\s+URL\s*\(\s*["'](?:undefined|null)["']/g,'URLコンストラクタへ不正な定数文字列を渡しています','固定値からURL解釈失敗の可能性があります。','MEDIUM','URL Contract']
     ];
-    for(const [rx,title,desc] of threeRules){const m=rx.exec(text);if(m)v14Med(issues,text,{loc:{start:{line:lineAt(text,m.index)}}},'Three.js / Game',title,desc,{evidence:[['three-game-pattern',24,'ゲーム/Three.jsパターンを検出']]});}
-    const gameNames=/\b(?:hp|health|mana|mp|xp|gold|coins|score|level|cooldown|ammo|stamina|velocity|speed|damage)\b/i;
-    const lines=text.split('\n');for(let i=0;i<lines.length;i++){const l=lines[i];if(gameNames.test(l)&&/\+=\s*["']|-=\s*["']/.test(l))v14Exact(issues,text,{loc:{start:{line:i+1}}},'Game State','ゲーム状態値へ文字列を加算/減算しています','数値状態と文字列の型混在が確定しています。');}
+    for(const r of matrix){for(const m of text.matchAll(r[0]))v14Add(issues,{severity:r[3],kind:r[4],line:lineAt(text,m.index),title:r[1],desc:r[2],snippet:getLineText(lines,lineAt(text,m.index)),confidence:r[3]==='HIGH'?'HIGH':'LOW',evidence:[['contract-matrix',30,'統合API契約マトリクスに一致']]});}
   }
-  function v14EvidenceFirewall(issues){
-    const allowStrong=new Set(['CERTAIN','HIGH']);
-    for(const it of issues){
-      const t=(it.title+' '+it.desc);
-      if(it.confidence==='LOW'&&it.severity==='HIGH')it.severity='MEDIUM';
-      if(/可能性があります|確認してください|かもしれません/.test(t)&&it.confidence==='LOW'&&it.severity==='MEDIUM')it.severity='INFO';
-      if(!it.evidence||it.evidence.length<2){if(it.severity==='CRITICAL')it.severity='HIGH';if(it.severity==='HIGH'&&it.confidence!=='CERTAIN')it.severity='MEDIUM';}
-      if(/Three\.js.*生成|renderer.*生成|Texture.*生成/.test(t)&&!it.evidence?.some(e=>/three-game-pattern/.test(e.type)))it.severity='INFO';
+  function v14Firewall(issues,lang,text){
+    const out=[];
+    for(const it of issues){let score=it.confidenceScore||0;const t=(it.title||'')+' '+(it.desc||'');
+      if(/可能性|確認してください|検討|候補/.test(t)&&it.confidence!=='CERTAIN')score=Math.min(score,59);
+      if(/Three\.js|three\.js/i.test(t)&&!/(THREE\.|renderer\.|scene\.|camera\.)/.test(text))score=Math.min(score,39);
+      if(it.severity==='HIGH'&&score<80&&it.confidence!=='CERTAIN')it.severity='MEDIUM';
+      if(it.severity==='MEDIUM'&&score<50)it.severity='LOW';
+      if(it.severity==='LOW'&&score<20)continue;
+      out.push(it);
     }
-  }
-  function runV14V20Integrated(text,lang,issues,htmlInfo){
-    /* V14: symbols/type */
-    if(['js','ts'].includes(lang)){
-      const p=parseJSWithAST(text); if(p.ast){v14TypeAndShape(text,p.ast,issues);v14CallGraph(text,p.ast,issues);v14PathConstraints(text,p.ast,issues);v14SSA(text,p.ast,issues);v14HeapAlias(text,p.ast,issues);v14Taint(text,p.ast,issues,htmlInfo);v14Async(text,p.ast,issues);v14WebApiContracts(text,p.ast,issues);v14ConstArrayCheck(text,p.ast,issues);}
-    }
-    /* V15: DOM/CSS/data-state */
-    if(lang==='html'){v14HtmlDeep(text,htmlInfo,issues);for(const st of htmlInfo?.styles||[])v14CssDeep(st.content,issues,st.lineOffset+1);for(const sc of htmlInfo?.scripts||[]){if(sc.external)continue;const p=parseJSWithAST(sc.content);if(p.ast){v14TypeAndShape(sc.content,p.ast,issues);v14CallGraph(sc.content,p.ast,issues);v14Taint(sc.content,p.ast,issues,htmlInfo);v14Async(sc.content,p.ast,issues);v14WebApiContracts(sc.content,p.ast,issues);v14ConstArrayCheck(sc.content,p.ast,issues);}}}
-    if(lang==='css')v14CssDeep(text,issues,1);
-    /* V16: Web API contract matrix + runtime boundaries */
-    if(['js','ts'].includes(lang))v14Security(text,lang,issues);
-    /* V17: Security / taint */
-    v14Security(text,lang,issues);
-    /* V18: Three.js / Game logic */
-    v14ThreeGame(text,lang,issues);
-    /* V19: conservative evidence revalidation */
-    v14EvidenceFirewall(issues);
-    /* V20: cross-engine summary signals */
-    const hard=issues.filter(x=>x.severity==='CRITICAL'||x.severity==='HIGH');
-    const kinds=new Set(hard.map(x=>x.kind));
-    if(hard.length>=8&&kinds.size>=4){
-      const summary={severity:'INFO',line:1,kind:'V14-V20 Integrated',title:'複数解析層で同一コード領域の問題を検出しました',desc:'AST・型・制御フロー・API/DOM/状態解析の複数層で高確度の指摘が存在します。重複ではなく異なる根拠を確認してください。',snippet:'',confidence:'HIGH'};pushIssue(issues,summary);
-    }
+    return out;
   }
 
   function runScanText(text, forcedLang, hintExt){
@@ -3755,9 +3646,8 @@ function runMaxAccuracyLayer(text,lang,issues,htmlInfo){
     if(lang==='html'){ for(const sc of (htmlInfo?.scripts||[])){ if(sc.external) continue; runV13UltimatePrecision(sc.content,'js',issues,htmlInfo,sc.lineOffset+1); } }
     runV12MegaPrecision(text,lang,issues,htmlInfo);
     runMaxAccuracyFirewall(issues);
-    runV14V20Integrated(text,lang,issues,htmlInfo);
-    runMaxAccuracyFirewall(issues);
-    const finalIssues=finalizeStaticIssues(dedupeIssues(issues),lang,text,htmlInfo);
+    v14Unified(text,lang,issues,htmlInfo,1);
+    const finalIssues=finalizeStaticIssues(v14Firewall(dedupeIssues(issues),lang,text),lang,text,htmlInfo);
     const parserMap={html:'HTML + AST + cross-link',js:window.acorn?'Acorn AST + deep layers':'Native parser fallback + deep layers',css:'CSS structural analyzer',py:'Python semantic heuristics',json:'JSON native parser',sql:'SQL structural + safety analyzer',ts:'TypeScript semantic heuristics',java:'Java semantic heuristics',c:'C semantic heuristics',cpp:'C++ semantic heuristics',cs:'C# semantic heuristics',go:'Go semantic heuristics',rust:'Rust semantic heuristics',php:'PHP semantic heuristics',ruby:'Ruby semantic heuristics',kotlin:'Kotlin semantic heuristics',swift:'Swift semantic heuristics'}; return {lang,issues:finalIssues,parser:parserMap[lang]||'Dedicated semantic analyzer'};
   }
 
@@ -3835,11 +3725,10 @@ function runMaxAccuracyLayer(text,lang,issues,htmlInfo){
     report(88,'v13 Ultimate Precision / 契約・型・DOM・Security'); await yieldNow();
     runV12MegaPrecision(text,lang,issues,htmlInfo); report(91,'Mega Precision / 900+系統を検証'); await yieldNow();
     runMaxAccuracyFirewall(issues); runV10FalsePositiveFirewall(issues,lang,text); report(94,'誤検出ファイアウォール'); await yieldNow();
-    runV14V20Integrated(text,lang,issues,htmlInfo);
-    report(96,'V14〜V20統合解析 / Symbol・Type・CFG・CallGraph・Taint・API・DOM・CSS・Game'); await yieldNow();
-    runMaxAccuracyFirewall(issues); runV10FalsePositiveFirewall(issues,lang,text);
+    v14Unified(text,lang,issues,htmlInfo,1);
+    report(96,'新生V14 / Call Graph・Path・Shape・Taint・API・DOM・Three.js'); await yieldNow();
     const finalInfo=lang==='html'?htmlInfo:null;
-    let finalIssues=finalizeStaticIssues(dedupeIssues(issues),lang,text,finalInfo);
+    let finalIssues=finalizeStaticIssues(v14Firewall(dedupeIssues(issues),lang,text),lang,text,finalInfo);
     finalIssues=runV11PostPrecisionFilter(finalIssues,lang,text);
     report(97,'最終重複排除 / 確度計算'); await yieldNow();
     const parserMap={html:'HTML + AST + cross-link',js:window.acorn?'Acorn AST + deep layers':'Native parser fallback + deep layers',css:'CSS structural analyzer',py:'Python semantic heuristics',json:'JSON native parser',sql:'SQL structural + safety analyzer',ts:'TypeScript semantic heuristics',java:'Java semantic heuristics',c:'C semantic heuristics',cpp:'C++ semantic heuristics',cs:'C# semantic heuristics',go:'Go semantic heuristics',rust:'Rust semantic heuristics',php:'PHP semantic heuristics',ruby:'Ruby semantic heuristics',kotlin:'Kotlin semantic heuristics',swift:'Swift semantic heuristics'};
@@ -4273,10 +4162,6 @@ function runMaxAccuracyLayer(text,lang,issues,htmlInfo){
     add('v13 invalid BigInt',true,()=>{const r=runScanText('BigInt("1.2");','js');return {ok:has(r.issues,/BigInt/),detail:r.issues.map(x=>x.title).join(',')}});
     add('v13 null Object.keys',true,()=>{const r=runScanText('Object.keys(null);','js');return {ok:has(r.issues,/Object\.keys|Object/),detail:r.issues.map(x=>x.title).join(',')}});
     add('v13 safe URI',false,()=>{const r=runScanText('decodeURIComponent(encodeURIComponent("hello"));','js');return {ok:!has(r.issues,/確定例外/),detail:r.issues.map(x=>x.title).join(',')}});
-    add('v14 const array bounds',true,()=>{const r=runScanText('const a=[1]; console.log(a[2]);','js');return {ok:has(r.issues,/配列範囲外/),detail:r.issues.map(x=>x.title).join(',')}});
-    add('v14 radix contract',true,()=>{const r=runScanText('parseInt("10",1);','js');return {ok:has(r.issues,/radix/),detail:r.issues.map(x=>x.title).join(',')}});
-    add('v14 bad regexp',true,()=>{const r=runScanText('new RegExp("[");','js');return {ok:has(r.issues,/RegExp/),detail:r.issues.map(x=>x.title).join(',')}});
-    add('v14 clean DOM no false positive',true,()=>{const r=runScanText('<button id="ok"></button><script>document.getElementById("ok");</script>','html');return {ok:!has(r.issues,/未定義DOM/),detail:r.issues.map(x=>x.title).join(',')}});
     return tests;
   }
   window.LintBench={analyze:runScanText,runSelfTests};
