@@ -3722,6 +3722,7 @@ function runMaxAccuracyLayer(text,lang,issues,htmlInfo){
     runV15PrecisionLayer(text,lang,issues,htmlInfo);
     runV16MassivePrecision(text,lang,issues,htmlInfo);
     runV17FullStaticEngine(text,lang,issues,htmlInfo);
+    runV18PrecisionEngine(text,lang,issues,htmlInfo);
     const finalIssues=finalizeStaticIssues(v14Firewall(dedupeIssues(issues),lang,text),lang,text,htmlInfo);
     const parserMap={html:'HTML + AST + cross-link',js:window.acorn?'Acorn AST + deep layers':'Native parser fallback + deep layers',css:'CSS structural analyzer',py:'Python semantic heuristics',json:'JSON native parser',sql:'SQL structural + safety analyzer',ts:'TypeScript semantic heuristics',java:'Java semantic heuristics',c:'C semantic heuristics',cpp:'C++ semantic heuristics',cs:'C# semantic heuristics',go:'Go semantic heuristics',rust:'Rust semantic heuristics',php:'PHP semantic heuristics',ruby:'Ruby semantic heuristics',kotlin:'Kotlin semantic heuristics',swift:'Swift semantic heuristics'}; return {lang,issues:finalIssues,parser:parserMap[lang]||'Dedicated semantic analyzer'};
   }
@@ -3810,6 +3811,7 @@ function runMaxAccuracyLayer(text,lang,issues,htmlInfo){
     runV15PrecisionLayer(text,lang,issues,htmlInfo);
     runV16MassivePrecision(text,lang,issues,htmlInfo);
     runV17FullStaticEngine(text,lang,issues,htmlInfo);
+    runV18PrecisionEngine(text,lang,issues,htmlInfo);
     report(99,'V17 Full Graph / Call・CFG・Type・Taint・Resource・Game'); await yieldNow();
     const finalInfo=lang==='html'?htmlInfo:null;
     let finalIssues=finalizeStaticIssues(v14Firewall(dedupeIssues(issues),lang,text),lang,text,finalInfo);
@@ -4370,6 +4372,288 @@ function runMaxAccuracyLayer(text,lang,issues,htmlInfo){
       if(lang==='rust'&&/\.unwrap\s*\(\)/.test(l)) v15Add(issues,{severity:'LOW',kind:'Rust Runtime',line:i+1,title:'Rustでunwrap()によるパニック経路があります',desc:'Err/None時にpanicするため、外部入力や実行時失敗を扱う箇所ではResult/Optionの分岐を検討してください。',snippet:l.trim(),cause:'失敗値を無条件unwrap',after:'match / ? / unwrap_or 等で失敗経路を扱う',confidence:'LOW',evidence:[['Rust semantics',40,'unwrapを検出']]});
       if(lang==='swift'&&/\btry!\b/.test(l)) v15Add(issues,{severity:'LOW',kind:'Swift Runtime',line:i+1,title:'Swiftでtry!による強制アンラップがあります',desc:'失敗時にruntime trapになるため、失敗があり得る処理ではdo-catch/try?等を検討してください。',snippet:l.trim(),cause:'throwable APIを強制成功扱い',after:'do-catch / try? / try を使って失敗経路を処理',confidence:'LOW',evidence:[['Swift semantics',40,'try!を検出']]});
     });
+  }
+
+  /* ================================================================
+     V18 PRECISION / FALSE-POSITIVE REDUCTION ENGINE
+     - Additive only. Existing V1-V17 remain intact.
+     - Deterministic contracts + conservative context guards.
+     - Local duplicate suppression and evidence-aware confidence.
+     ================================================================= */
+  function runV18PrecisionEngine(text, lang, issues, htmlInfo){
+    try {
+      const lines = text.split('\n');
+      const added = new Set();
+      const existing = new Set((issues || []).map(x => String(x.title || '') + '|' + String(x.line || 0)));
+      const lineOf = n => Math.max(1, Math.min(lines.length, Number(n) || 1));
+      const lineText = n => (lines[lineOf(n) - 1] || '').trim();
+      const add = o => {
+        const ln = lineOf(o.line);
+        const title = String(o.title || '');
+        const key = title + '|' + ln;
+        if (!title || existing.has(key) || added.has(key)) return null;
+        const id = pushIssue(issues, {
+          severity: o.severity || 'MEDIUM',
+          kind: o.kind || 'V18',
+          title,
+          desc: o.desc || '',
+          line: ln,
+          snippet: o.snippet || lineText(ln),
+          confidence: o.confidence || 'MEDIUM',
+          confidenceScore: Number.isFinite(o.score) ? o.score : 55,
+          before: o.before || '',
+          after: o.after || ''
+        });
+        const it = issues[issues.length - 1];
+        it.evidence = it.evidence || [];
+        for (const e of (o.evidence || [])) it.evidence.push({ type: e[0], text: e[1], weight: e[2] });
+        added.add(key);
+        return id;
+      };
+      const isJS = lang === 'js' || lang === 'ts';
+      const isHTML = lang === 'html';
+      const jsBlocks = [];
+      if (isJS) jsBlocks.push({ src: text, base: 1 });
+      if (isHTML) {
+        for (const sc of (htmlInfo?.scripts || [])) if (!sc.external) jsBlocks.push({ src: sc.content, base: sc.lineOffset + 1 });
+      }
+      const astCache = new Map();
+      const getAst = src => {
+        if (astCache.has(src)) return astCache.get(src);
+        const p = parseJSWithAST(src);
+        astCache.set(src, p);
+        return p;
+      };
+      const nline = n => Math.max(1, n?.loc?.start?.line || 1);
+      const ntext = (src, n) => n && Number.isFinite(n.start) && Number.isFinite(n.end) ? src.slice(n.start, n.end) : '';
+      const literal = n => {
+        if (!n) return { known: false };
+        if (n.type === 'Literal') return { known: true, value: n.value };
+        if (n.type === 'TemplateLiteral' && !n.expressions?.length) return { known: true, value: n.quasis?.[0]?.value?.cooked ?? '' };
+        if (n.type === 'UnaryExpression' && ['+', '-', '!', '~'].includes(n.operator)) {
+          const a = literal(n.argument); if (!a.known) return { known: false };
+          if (n.operator === '+') return { known: true, value: +a.value };
+          if (n.operator === '-') return { known: true, value: -a.value };
+          if (n.operator === '!') return { known: true, value: !a.value };
+          return { known: true, value: ~a.value };
+        }
+        if (n.type === 'BinaryExpression' && ['+', '-', '*', '/', '%', '**', '<', '<=', '>', '>=', '==', '===', '!=', '!=='].includes(n.operator)) {
+          const a = literal(n.left), b = literal(n.right); if (!a.known || !b.known) return { known: false };
+          try {
+            switch (n.operator) {
+              case '+': return { known: true, value: a.value + b.value };
+              case '-': return { known: true, value: a.value - b.value };
+              case '*': return { known: true, value: a.value * b.value };
+              case '/': return { known: true, value: a.value / b.value };
+              case '%': return { known: true, value: a.value % b.value };
+              case '**': return { known: true, value: a.value ** b.value };
+              case '<': return { known: true, value: a.value < b.value };
+              case '<=': return { known: true, value: a.value <= b.value };
+              case '>': return { known: true, value: a.value > b.value };
+              case '>=': return { known: true, value: a.value >= b.value };
+              case '==': return { known: true, value: a.value == b.value };
+              case '===': return { known: true, value: a.value === b.value };
+              case '!=': return { known: true, value: a.value != b.value };
+              case '!==': return { known: true, value: a.value !== b.value };
+            }
+          } catch (_) {}
+        }
+        return { known: false };
+      };
+      const callName = n => {
+        if (!n || n.type !== 'CallExpression') return '';
+        if (n.callee?.type === 'Identifier') return n.callee.name;
+        if (n.callee?.type === 'MemberExpression' && !n.callee.computed) {
+          const o = n.callee.object?.name || '';
+          const p = n.callee.property?.name || '';
+          return o && p ? o + '.' + p : p;
+        }
+        return '';
+      };
+
+      for (const b of jsBlocks) {
+        const parsed = getAst(b.src);
+        if (!parsed.ast) continue;
+        const nodes = [];
+        astWalk(parsed.ast, n => nodes.push(n));
+        const tainted = new Set();
+        const parentOf = new Map();
+        const buildParents = (node, parent) => {
+          if (!node || typeof node !== 'object') return;
+          if (parent) parentOf.set(node, parent);
+          for (const k of Object.keys(node)) {
+            if (k === 'loc' || k === 'start' || k === 'end') continue;
+            const v = node[k];
+            if (Array.isArray(v)) for (const x of v) if (x && typeof x.type === 'string') buildParents(x, node);
+            else if (v && typeof v.type === 'string') buildParents(v, node);
+          }
+        };
+        buildParents(parsed.ast, null);
+
+        for (const n of nodes) {
+          const ln = b.base + nline(n) - 1;
+
+          if (n.type === 'BinaryExpression' && (n.operator === '/' || n.operator === '%')) {
+            const r = literal(n.right);
+            if (r.known && typeof r.value === 'number' && r.value === 0) add({ severity: 'CRITICAL', kind: 'Arithmetic', title: '0による除算を確定検出しました', desc: '右辺が静的に0です。Infinity/NaNや実行時ロジック破綻の原因になります。', line: ln, confidence: 'CERTAIN', score: 99, evidence: [['constant-evaluation', '右辺が0へ確定評価', 80], ['ast-contract', '除算/剰余演算を確認', 50]] });
+          }
+
+          if (n.type === 'NewExpression' && n.callee?.name === 'Array' && n.arguments?.length === 1) {
+            const a = literal(n.arguments[0]);
+            if (a.known && typeof a.value === 'number' && (!Number.isInteger(a.value) || a.value < 0)) add({ severity: 'HIGH', kind: 'Array Contract', title: 'Array()の長さ引数が不正です', desc: '単一数値引数は0以上の整数である必要があります。', line: ln, confidence: 'CERTAIN', score: 98, evidence: [['constant-evaluation', 'Array長を静的評価', 75], ['ecmascript-contract', 'Array constructor contract', 65]] });
+          }
+
+          if (n.type === 'CallExpression' && n.callee?.type === 'Identifier' && n.callee.name === 'parseInt' && n.arguments?.length === 1) add({ severity: 'LOW', kind: 'API Contract', title: 'parseIntの基数指定がありません', desc: '意図した基数を固定するなら10等のradix指定を使ってください。', line: ln, confidence: 'LOW', score: 42, evidence: [['api-contract', 'parseIntが1引数', 30]] });
+
+          if (n.type === 'CallExpression' && n.callee?.type === 'MemberExpression' && !n.callee.computed && n.callee.property?.name === 'forEach') {
+            const cb = n.arguments?.[0];
+            if (cb?.type === 'ArrowFunctionExpression' && cb.async) add({ severity: 'MEDIUM', kind: 'Async', title: 'forEach内のasyncコールバックを検出しました', desc: 'forEachはPromiseを待機しないため、完了順序・エラー伝播を確認してください。', line: ln, confidence: 'HIGH', score: 82, evidence: [['ast-contract', 'forEach + async callback', 60], ['async-semantics', 'forEachはawaitしない', 55]] });
+          }
+
+          if (n.type === 'NewExpression' && n.callee?.name === 'Promise') {
+            const ex = n.arguments?.[0];
+            if ((ex?.type === 'FunctionExpression' || ex?.type === 'ArrowFunctionExpression') && ex.async) add({ severity: 'MEDIUM', kind: 'Async', title: 'Promiseコンストラクタへasync executorを渡しています', desc: 'async executorの返り値は外側Promiseへ自動連結されません。', line: ln, confidence: 'HIGH', score: 86, evidence: [['promise-contract', 'async executor', 70], ['promise-semantics', 'executorの返り値は採用されない', 60]] });
+          }
+
+          if (n.type === 'BlockStatement' && n.body?.length) {
+            let terminated = false;
+            for (const st of n.body) {
+              if (terminated) add({ severity: 'LOW', kind: 'Control Flow', title: '到達不能な文を検出しました', desc: '直前のreturn/throw/break/continueにより通常経路では到達できません。', line: b.base + nline(st) - 1, confidence: 'HIGH', score: 84, evidence: [['control-flow', 'terminating statement before sibling', 70]] });
+              if (['ReturnStatement', 'ThrowStatement', 'BreakStatement', 'ContinueStatement'].includes(st.type)) terminated = true;
+            }
+          }
+
+          if (n.type === 'SwitchStatement') {
+            const seen = new Map();
+            for (const cs of (n.cases || [])) {
+              const v = literal(cs.test);
+              if (!v.known) continue;
+              const key = typeof v.value + ':' + String(v.value);
+              if (seen.has(key)) add({ severity: 'HIGH', kind: 'Control Flow', title: 'switchに同じ定数caseがあります', desc: '同値caseの重複により、意図した分岐にならない可能性があります。', line: b.base + nline(cs) - 1, confidence: 'CERTAIN', score: 96, evidence: [['switch-analysis', 'case定数を評価', 70], ['duplicate-case', '同値caseを検出', 70]] });
+              else seen.set(key, cs);
+            }
+          }
+
+          if (n.type === 'ForStatement' && n.test?.type === 'BinaryExpression' && n.test.operator === '<=' && n.test.right?.type === 'MemberExpression' && !n.test.right.computed && n.test.right.property?.name === 'length') {
+            add({ severity: 'HIGH', kind: 'Bounds', title: '配列lengthに対する<=比較を検出しました', desc: '通常の0始まり配列走査ではlengthの値を添字として1回余分に使う原因になります。', line: b.base + nline(n.test) - 1, confidence: 'HIGH', score: 90, evidence: [['bounds-analysis', 'length境界をASTで確認', 75], ['loop-contract', '<=終端', 55]] });
+          }
+
+          if (n.type === 'CallExpression') {
+            const cn = callName(n);
+            if (n.callee?.type === 'Identifier' && (cn === 'eval' || cn === 'Function')) add({ severity: 'HIGH', kind: 'Security', title: '動的コード実行APIを使用しています', desc: '外部入力が到達する場合、コードインジェクションへつながります。', line: ln, confidence: 'HIGH', score: 92, evidence: [['security-api', '動的コード実行API', 70]] });
+            if ((cn === 'setTimeout' || cn === 'setInterval') && n.arguments?.[0]?.type === 'Literal' && typeof n.arguments[0].value === 'string') add({ severity: 'HIGH', kind: 'Security / Async', title: 'タイマーへ文字列コードを渡しています', desc: '文字列評価を避け、関数参照を使ってください。', line: ln, confidence: 'CERTAIN', score: 98, evidence: [['api-contract', 'string timer callback', 80], ['security', 'implicit eval', 60]] });
+            if (cn === 'postMessage' && n.arguments?.[1]?.type === 'Literal' && n.arguments[1].value === '*') add({ severity: 'MEDIUM', kind: 'Security', title: 'postMessageのtargetOriginが*です', desc: '固定可能なら具体的なoriginを指定してください。', line: ln, confidence: 'HIGH', score: 86, evidence: [['web-api', 'targetOriginが*', 65]] });
+            if (cn === 'fetch' && n.arguments?.[0]?.type === 'Literal' && typeof n.arguments[0].value === 'string' && /^http:\/\//i.test(n.arguments[0].value)) add({ severity: 'MEDIUM', kind: 'Security / Transport', title: 'fetchでHTTP URLを使用しています', desc: '機密情報や認証付き通信ではHTTPSを使用してください。', line: ln, confidence: 'HIGH', score: 84, evidence: [['transport', 'http URL', 55]] });
+          }
+
+          if (n.type === 'MemberExpression' && !n.optional && n.object?.type === 'CallExpression' && n.object.callee?.type === 'MemberExpression') {
+            const p = n.object.callee.property?.name;
+            if (p === 'querySelector' || p === 'getElementById') {
+              const parent = parentOf.get(n.object);
+              const ctx = parent ? ntext(b.src, parent) : ntext(b.src, n);
+              if (!/if\s*\(|\?\.|null|undefined|throw|assert/i.test(ctx)) add({ severity: 'MEDIUM', kind: 'DOM / Nullability', title: 'DOM取得結果をnull確認せず直後に使用しています', desc: '対象要素がない経路ではTypeErrorになる可能性があります。', line: ln, confidence: 'MEDIUM', score: 64, evidence: [['dom-nullability', 'DOM取得直後のmember access', 55], ['guard-check', '近接ガードなし', 40]] });
+            }
+          }
+
+          if (n.type === 'VariableDeclarator' && n.id?.type === 'Identifier' && n.init) {
+            const raw = ntext(b.src, n.init);
+            if (/(location(?:\.search|\.hash|\.href)?|document\.cookie|localStorage\.getItem|sessionStorage\.getItem|URLSearchParams|prompt\s*\()/i.test(raw)) tainted.add(n.id.name);
+          }
+          if (n.type === 'AssignmentExpression' && n.left?.type === 'Identifier' && n.right) {
+            const raw = ntext(b.src, n.right);
+            for (const t of tainted) if (new RegExp('\\b' + escReg(t) + '\\b').test(raw)) tainted.add(n.left.name);
+          }
+          if (n.type === 'AssignmentExpression' && n.left?.type === 'MemberExpression' && !n.left.computed && ['innerHTML', 'outerHTML'].includes(n.left.property?.name)) {
+            const raw = ntext(b.src, n.right);
+            const taintedHere = /location(?:\.search|\.hash|\.href)?|document\.cookie|prompt\s*\(|localStorage\.getItem|sessionStorage\.getItem/i.test(raw) || [...tainted].some(t => new RegExp('\\b' + escReg(t) + '\\b').test(raw));
+            if (taintedHere) add({ severity: 'CRITICAL', kind: 'Security / Taint', title: '外部入力由来データがinnerHTML/outerHTMLへ到達しています', desc: 'HTML sinkへ入力系データを直接代入しています。textContentやサニタイズを検討してください。', line: ln, confidence: 'HIGH', score: 98, evidence: [['taint-source', '入力系データ', 65], ['html-sink', 'innerHTML/outerHTML', 75]] });
+          }
+          if (n.type === 'CallExpression') {
+            const cn = callName(n);
+            const raw = (n.arguments || []).map(a => ntext(b.src, a)).join(',');
+            const hit = [...tainted].some(t => new RegExp('\\b' + escReg(t) + '\\b').test(raw));
+            if (hit && cn === 'eval') add({ severity: 'CRITICAL', kind: 'Security / Taint', title: '外部入力由来データがevalへ到達しています', desc: '入力が動的コード実行へ到達しています。', line: ln, confidence: 'CERTAIN', score: 100, evidence: [['taint-source', '入力由来変数', 70], ['taint-sink', 'eval sink', 85]] });
+          }
+
+          if (n.type === 'CallExpression' && callName(n) === 'removeEventListener' && n.arguments?.[1]) {
+            const raw = ntext(b.src, n.arguments[1]);
+            if (/=>|function\s*\(/.test(raw)) add({ severity: 'HIGH', kind: 'Event Lifecycle', title: 'removeEventListenerに新しい匿名関数を渡しています', desc: '登録時と同じ関数参照ではないため、解除できない可能性が高いです。', line: ln, confidence: 'HIGH', score: 94, evidence: [['event-contract', 'anonymous callback passed to removeEventListener', 75]] });
+          }
+        }
+
+        const creates = [], clears = [];
+        for (const n of nodes) {
+          if (n.type !== 'CallExpression') continue;
+          const cn = callName(n), ln = b.base + nline(n) - 1;
+          if (cn === 'setInterval') creates.push({ kind: cn, line: ln });
+          if (cn === 'clearInterval') clears.push({ kind: cn, line: ln });
+          if (cn === 'requestAnimationFrame') creates.push({ kind: cn, line: ln });
+          if (cn === 'cancelAnimationFrame') clears.push({ kind: cn, line: ln });
+        }
+        if (creates.some(x => x.kind === 'setInterval') && !clears.some(x => x.kind === 'clearInterval')) add({ severity: 'MEDIUM', kind: 'Resource Lifecycle', title: 'setIntervalに対応するclearIntervalが静的に見つかりません', desc: '常駐タイマーなら問題ありませんが、再初期化や画面破棄がある場合は多重実行・リークを確認してください。', line: creates.find(x => x.kind === 'setInterval').line, confidence: 'MEDIUM', score: 60, evidence: [['resource-create', 'setInterval検出', 40], ['resource-clear', 'clearIntervalなし', 45]] });
+      }
+
+      if (isHTML && htmlInfo) {
+        const ids = htmlInfo.ids || new Map();
+        let m;
+        const reLabel = /<label\b[^>]*\bfor\s*=\s*["']([^"']+)["'][^>]*>/ig;
+        while ((m = reLabel.exec(text))) if (!ids.has(m[1])) add({ severity: 'HIGH', kind: 'HTML / Accessibility', title: 'labelのfor属性が存在しないidを参照しています', desc: 'labelと対象入力要素の関連付けが切れています。', line: lineAt(text, m.index), confidence: 'HIGH', score: 90, evidence: [['html-id-graph', 'id集合とlabel forを照合', 75]] });
+        const reBlank = /<a\b([^>]*)>/ig;
+        while ((m = reBlank.exec(text))) {
+          const a = m[1] || '';
+          if (/target\s*=\s*["']_blank["']/i.test(a) && !/rel\s*=\s*["'][^"']*(?:noopener|noreferrer)/i.test(a)) add({ severity: 'MEDIUM', kind: 'HTML / Security', title: 'target="_blank"にnoopener対策がありません', desc: '外部ページを新規タブで開く場合はrel="noopener noreferrer"を検討してください。', line: lineAt(text, m.index), confidence: 'HIGH', score: 84, evidence: [['html-security', 'target=_blank', 55], ['opener-protection', 'noopener/noreferrerなし', 55]] });
+        }
+        const reButton = /<button\b([^>]*)>/ig;
+        while ((m = reButton.exec(text))) {
+          const a = m[1] || '';
+          const before = text.slice(0, m.index);
+          if (/\b<form\b/i.test(before.slice(Math.max(0, before.lastIndexOf('<form')), m.index)) && !/\btype\s*=/.test(a)) add({ severity: 'MEDIUM', kind: 'HTML / Form', title: 'form内のbuttonにtype属性がありません', desc: 'デフォルトsubmitにより意図しないフォーム送信を起こす可能性があります。', line: lineAt(text, m.index), confidence: 'HIGH', score: 82, evidence: [['html-form', 'form文脈を検出', 55], ['button-contract', 'typeなしbutton', 55]] });
+        }
+        const reJs = /href\s*=\s*["']javascript:/ig;
+        while ((m = reJs.exec(text))) add({ severity: 'HIGH', kind: 'HTML / Security', title: 'javascript: URLを使用しています', desc: '危険なURLスキームです。通常のURLやイベント処理へ置き換えてください。', line: lineAt(text, m.index), confidence: 'CERTAIN', score: 99, evidence: [['html-url', 'javascript: scheme', 75]] });
+      }
+
+      const cssBlocks = [];
+      if (lang === 'css') cssBlocks.push({ src: text, base: 1 });
+      if (isHTML) for (const st of (htmlInfo?.styles || [])) cssBlocks.push({ src: st.content, base: st.lineOffset + 1 });
+      for (const b of cssBlocks) {
+        const ls = b.src.split('\n');
+        for (let i = 0; i < ls.length; i++) {
+          if (/url\(\s*javascript:/i.test(ls[i])) add({ severity: 'CRITICAL', kind: 'CSS Security', title: 'CSSのurl()にjavascript:が含まれています', desc: '危険なURLスキームを使用しています。', line: b.base + i, confidence: 'CERTAIN', score: 100, evidence: [['css-url', 'javascript scheme', 90]] });
+        }
+      }
+
+      if (lang === 'py') {
+        for (let i = 0; i < lines.length; i++) {
+          const l = lines[i];
+          if (/^\s*def\s+\w+\s*\([^)]*=[^)]*\[/.test(l) || /^\s*def\s+\w+\s*\([^)]*=[^)]*\{/.test(l)) add({ severity: 'HIGH', kind: 'Python Mutable Default', title: '関数のデフォルト引数にmutableオブジェクトがあります', desc: '呼び出し間で同じlist/dict等が共有される典型的なPythonバグです。', line: i + 1, confidence: 'HIGH', score: 94, evidence: [['python-semantics', 'mutable default argument', 80]] });
+          if (/\binput\s*\(/.test(l) && /\beval\s*\(/.test(l)) add({ severity: 'CRITICAL', kind: 'Python Security', title: 'input()がeval()へ直接到達しています', desc: 'ユーザー入力がコード実行されます。', line: i + 1, confidence: 'CERTAIN', score: 100, evidence: [['taint', 'input source', 75], ['sink', 'eval', 85]] });
+        }
+      }
+
+      if (lang === 'sql') {
+        for (let i = 0; i < lines.length; i++) {
+          const l = lines[i];
+          if (/\b(?:DELETE|UPDATE)\b/i.test(l) && !/\bWHERE\b/i.test(l) && /;?\s*$/.test(l)) add({ severity: 'HIGH', kind: 'SQL Safety', title: 'WHEREなしのDELETE/UPDATEを検出しました', desc: '全行更新/削除になる可能性があります。', line: i + 1, confidence: 'HIGH', score: 90, evidence: [['sql-structure', 'DELETE/UPDATE', 55], ['sql-safety', 'WHEREなし', 65]] });
+        }
+      }
+
+      if (['c', 'cpp'].includes(lang)) {
+        for (let i = 0; i < lines.length; i++) if (/\bgets\s*\(/.test(lines[i])) add({ severity: 'CRITICAL', kind: 'Memory Safety', title: 'gets()を使用しています', desc: '入力長を制御できず、バッファオーバーフローの原因になります。', line: i + 1, confidence: 'CERTAIN', score: 100, evidence: [['unsafe-api', 'gets', 95]] });
+      }
+
+      for (const it of issues) {
+        if (!it || !Array.isArray(it.evidence)) continue;
+        const types = new Set(it.evidence.map(e => e.type).filter(Boolean));
+        if (types.size >= 2) it.confidenceScore = Math.max(Number(it.confidenceScore || 0), Math.min(100, Number(it.confidenceScore || 0) + 6));
+        if (Number(it.confidenceScore || 0) < 45 && it.confidence !== 'CERTAIN') {
+          it.confidence = 'LOW';
+          if (it.severity === 'CRITICAL') it.severity = 'HIGH';
+        }
+      }
+    } catch (err) {
+      console.warn('[LintBench] V18 precision engine failed', err);
+    }
   }
 
   /* ================================================================
