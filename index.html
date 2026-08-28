@@ -905,28 +905,65 @@
     return out.sort((a,b)=>(SEVERITY_RANK[a.severity]-SEVERITY_RANK[b.severity]) || a.line-b.line);
   }
 
-  function detectLanguage(text, hintExt){
-    const explicit=els.langSelect.value;
-    if(explicit!=='auto') return explicit;
-    if(hintExt) return hintExt;
-    const t=text.trim();
-    if(/^<!doctype\b/i.test(t) || /^<html\b/i.test(t) || /<(head|body|script|style|div|main|button|form)\b/i.test(t)) return 'html';
-    if(/^\s*[\[{]/.test(t)){ try{ JSON.parse(t); return 'json'; }catch(_){} }
-    if(/\b(interface|type|enum|namespace)\s+[A-Za-z_$][\w$]*\s*(?:[={]|extends\b)/.test(t) && /:\s*(string|number|boolean|unknown|any|void|never)\b/.test(t)) return 'ts';
-    if(/\b(package\s+[A-Za-z_][\w.]*;|import\s+[\w.]+;|public\s+(?:static\s+)?(?:class|interface)|System\.out\.println|@Override)\b/.test(t)) return 'java';
-    if(/#include\s*<[^>]+>|\b(int|char|float|double|size_t)\s+main\s*\(/.test(t) && /;/.test(t)) return /\bstd::|#include\s*<iostream>|using\s+namespace\s+std/.test(t) ? 'cpp' : 'c';
-    if(/\b(namespace|using)\s+[A-Za-z_][\w.]*\s*;|\b(Console\.WriteLine|public\s+class|using\s+System)\b/.test(t)) return 'cs';
-    if(/\bpackage\s+main\b|\bfunc\s+\w+\s*\(|\bfmt\.Println\b|:=/.test(t)) return 'go';
-    if(/\b(fn|let|mut|impl|trait|match|println!)\b/.test(t) && /\bfn\s+main\b|->\s*[A-Za-z_][\w:]*/.test(t)) return 'rust';
-    if(/<\?php\b|\$[A-Za-z_][\w]*\s*=|->\s*[A-Za-z_][\w]*/.test(t) && /\b(echo|function|namespace)\b/.test(t)) return 'php';
-    if(/\b(def|class|module|require|attr_reader|puts)\b/.test(t) && /\bdo\b|\bend\b/.test(t)) return 'ruby';
-    if(/\b(SELECT|INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|CREATE\s+TABLE|ALTER\s+TABLE)\b/i.test(t)) return 'sql';
-    if(/\b(fun|data\s+class|sealed\s+class|object)\b/.test(t) && /\bval\s+\w+\s*:|\bvar\s+\w+\s*:/.test(t)) return 'kotlin';
-    if(/\b(import\s+Foundation|struct\s+\w+\s*:\s*|func\s+\w+\s*\(|let\s+\w+\s*=)/.test(t) && /\b(var|let|func|guard|if)\b/.test(t)) return 'swift';
-    if(/(^|\n)\s*(def\s|from\s+.+\s+import\s|import\s+\w+|class\s+\w+\s*:|elif\s|except\s)/.test(t)) return 'py';
-    if(/(^|\n)\s*[^{}]+\{[^{}]*:[^{}]*;/.test(t) && !/\b(function|const|let|var)\b/.test(t)) return 'css';
-    return 'js';
+  /* v19 language evidence */
+  const LANGUAGE_NAMES={html:'HTML',css:'CSS',js:'JavaScript',py:'Python',json:'JSON',ts:'TypeScript',java:'Java',c:'C',cpp:'C++',cs:'C#',go:'Go',rust:'Rust',php:'PHP',ruby:'Ruby',sql:'SQL',kotlin:'Kotlin',swift:'Swift'};
+  function stripForLangProbe(src){
+    return String(src||'')
+      .replace(/\/\*[\s\S]*?\*\//g,' ')
+      .replace(/<!--[\s\S]*?-->/g,' ')
+      .replace(/(^|[^:])\/\/.*$/gm,'$1 ')
+      .replace(/(["'`])(?:\\.|(?!\1)[\s\S])*\1/g,'""');
   }
+  function detectLanguageEvidence(text,hintExt){
+    const raw=String(text||''), t=raw.trim(), s=stripForLangProbe(raw);
+    const scores=Object.create(null), hits=Object.create(null);
+    const add=(l,p,r)=>{scores[l]=(scores[l]||0)+p;(hits[l]||(hits[l]=[])).push(r);};
+    if(hintExt&&LANGUAGE_NAMES[hintExt])add(hintExt,18,'拡張子ヒント');
+    if(/^<!doctype\s+html\b/i.test(t))add('html',120,'DOCTYPE');
+    if(/<html\b[\s>]|<\/(?:html|body|head)>/i.test(raw))add('html',90,'HTML文書構造');
+    if(/<(?:script|style|canvas|div|button|form|meta|link)\b/i.test(raw))add('html',60,'HTML要素');
+    try{JSON.parse(raw);if(/^\s*[\[{]/.test(t))add('json',130,'JSON厳密パース');}catch(_){}
+    if(/^\s*[\[{]/.test(t)&&/"\s*:/.test(raw))add('json',18,'JSONキー構造');
+    if(/\binterface\s+\w+|type\s+\w+\s*=|enum\s+\w+\s*\{|implements\s+\w+/.test(s))add('ts',58,'TypeScript宣言');
+    if(/:\s*(?:string|number|boolean|unknown|any|never|void|object)\b/.test(s))add('ts',30,'型注釈');
+    if(/\bas\s+(?:const|unknown|any|string|number|boolean)\b/.test(s))add('ts',14,'型アサーション');
+    if(/^\s*#\s*(?:include|define|ifdef|ifndef|pragma)\b/m.test(raw))add('c',85,'C/C++プリプロセッサ');
+    if(/\bstd::|using\s+namespace\s+std\s*;|#include\s*<iostream>|#include\s*<vector>/.test(raw))add('cpp',90,'C++標準ライブラリ');
+    if(/\btemplate\s*<|constexpr\b|nullptr\b|std::unique_ptr|std::shared_ptr/.test(s))add('cpp',44,'C++固有構文');
+    if(/\busing\s+System\s*;|Console\.Write(?:Line)?\s*\(/.test(raw))add('cs',90,'C#');
+    if(/\b(?:async\s+)?Task<|record\s+\w+/.test(s))add('cs',28,'C#型構文');
+    if(/\bpackage\s+main\b|\bfunc\s+\w+\s*\(|\bgo\s+\w+\s*\(|\bdefer\s+\w+/.test(s))add('go',95,'Go構文');
+    if(/\bchan\s+\w+|<-|\bselect\s*\{|\b:=/.test(s))add('go',30,'Go演算子');
+    if(/\bfn\s+\w+\s*\(|\blet\s+mut\b|\bimpl\s+\w+|\btrait\s+\w+|\bmatch\s+\w+\s*\{/.test(s))add('rust',95,'Rust構文');
+    if(/\b(?:Option|Result)<\w+|\bSome\(|\bNone\b|\bVec<\w+>/.test(s))add('rust',30,'Rust型');
+    if(/<\?php\b/.test(raw)||/\$\w+\s*(?:=|->)/.test(raw))add('php',82,'PHP構文');
+    if(/\becho\s+|\bnamespace\s+\w+;|\buse\s+\w+(?:\\\w+)+;/.test(s))add('php',28,'PHP予約語');
+    if(/\bdef\s+\w+\s*\(|\bfrom\s+\S+\s+import\s+|^\s*(?:elif|except|with|yield)\b/m.test(raw))add('py',90,'Python構文');
+    if(/\b(?:class|module)\s+\w+|\battr_(?:reader|writer)|\bputs\s+/.test(s)&&/\b(?:do|end)\b/.test(s))add('ruby',92,'Ruby構文');
+    if(/\brequire\s+['"]|unless\s+/.test(s))add('ruby',24,'Ruby予約語');
+    if(/\bSELECT\b[\s\S]*\bFROM\b|\bINSERT\s+INTO\b|\bUPDATE\s+\w+\s+SET\b|\bDELETE\s+FROM\b/i.test(raw))add('sql',115,'SQL文法');
+    if(/\bCREATE\s+(?:TABLE|INDEX|VIEW|DATABASE)\b|\bALTER\s+TABLE\b|\bJOIN\b/i.test(raw))add('sql',28,'SQL DDL/JOIN');
+    if(/\b(?:public\s+static\s+void\s+main|System\.out\.println|@Override)\b/.test(raw))add('java',100,'Java構文');
+    if(/\bpackage\s+[A-Za-z_][\w.]*\s*;/.test(raw)&&/\bimport\s+[A-Za-z_][\w.]*\s*;/.test(raw))add('java',35,'Java package/import');
+    if(/\b(?:fun|data\s+class|sealed\s+class|object)\s+\w+/.test(s)&&/\b(?:val|var)\s+\w+\s*:/.test(s))add('kotlin',95,'Kotlin型構文');
+    if(/\bwhen\s*\(|\bdata\s+class\b/.test(s))add('kotlin',24,'Kotlin予約語');
+    if(/\bimport\s+Foundation\b|\bfunc\s+\w+\s*\(/.test(raw)&&/\b(?:guard|let|var)\b/.test(raw))add('swift',92,'Swift構文');
+    if(/\b(?:protocol|extension|defer|guard)\b/.test(s))add('swift',24,'Swift予約語');
+    if(/(^|\n)\s*[.#]?[A-Za-z][\w-]*(?:\s+[.#]?[A-Za-z][\w-]*)?\s*\{[\s\S]*?[A-Za-z-]+\s*:\s*[^;{}]+;/m.test(raw)&&!/\b(?:function|const|let|var|class|import)\b/.test(s))add('css',92,'CSS宣言');
+    if(/@media\b|@keyframes\b|@supports\b/.test(raw))add('css',36,'CSSアットルール');
+    if(/\b(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=|=>|document\.[A-Za-z_$]+|window\.[A-Za-z_$]+/.test(raw))add('js',40,'JavaScript構文');
+    if(/\b(?:function\s+\w+\s*\(|async\s+function|Promise\.|await\s+|export\s+(?:default|const|function))\b/.test(raw))add('js',30,'JavaScript予約語');
+    if(/\binterface\s+\w+/.test(s)||/\btype\s+\w+\s*=/.test(s))scores.js=Math.max(0,(scores.js||0)-28);
+    if(/\bpackage\s+main\b/.test(s))scores.js=Math.max(0,(scores.js||0)-35);
+    const all=Object.keys(LANGUAGE_NAMES).map(lang=>({lang,score:scores[lang]||0,hits:(hits[lang]||[]).slice(0,6)})).sort((a,b)=>b.score-a.score);
+    let best=all[0]||{lang:'js',score:8,hits:['デフォルトJavaScript']};
+    if(best.score<=0)best={lang:'js',score:8,hits:['デフォルトJavaScript']};
+    const second=all.find(x=>x.lang!==best.lang&&x.score>0)||null;
+    const margin=second?Math.max(0,best.score-second.score):best.score;
+    const confidence=Math.max(30,Math.min(99,Math.round(48+Math.min(45,best.score)*0.75+Math.min(20,margin)*0.35)));
+    return {lang:best.lang,confidence,scores:all.filter(x=>x.score>0).slice(0,6),reason:best.hits,ambiguous:!!second&&margin<14,runnerUp:second};
+  }
+  function detectLanguage(text,hintExt){return detectLanguageEvidence(text,hintExt).lang;}
 
   function extractHTMLTag(text, start){
     let quote=null;
@@ -3675,7 +3712,7 @@ function runMaxAccuracyLayer(text,lang,issues,htmlInfo){
   }
 
   function runScanText(text, forcedLang, hintExt){
-    const lang=forcedLang&&forcedLang!=='auto'?forcedLang:detectLanguage(text,hintExt); const lines=text.split('\n'); let issues=[];
+    const detected=detectLanguageEvidence(text,hintExt); const lang=forcedLang&&forcedLang!=='auto'?forcedLang:detected.lang; const lines=text.split('\n'); let issues=[];
     let htmlInfo=null, scripts=[], styles=[];
     if(lang==='html'){
       const r=parseHTML(text,0); issues.push(...r.issues); htmlInfo=r.info; scripts=htmlInfo.scripts; styles=htmlInfo.styles;
@@ -3729,7 +3766,7 @@ function runMaxAccuracyLayer(text,lang,issues,htmlInfo){
 
 
   async function runScanTextAsync(text, forcedLang, hintExt, progressCb){
-    const lang=forcedLang&&forcedLang!=='auto'?forcedLang:detectLanguage(text,hintExt);
+    const detected=detectLanguageEvidence(text,hintExt); const lang=forcedLang&&forcedLang!=='auto'?forcedLang:detected.lang;
     const lines=text.split('\n'); let issues=[];
     let htmlInfo=null, scripts=[], styles=[];
     // Ensure the expensive line index is built once before deep layers begin.
@@ -3812,7 +3849,12 @@ function runMaxAccuracyLayer(text,lang,issues,htmlInfo){
     runV16MassivePrecision(text,lang,issues,htmlInfo);
     runV17FullStaticEngine(text,lang,issues,htmlInfo);
     runV18PrecisionEngine(text,lang,issues,htmlInfo);
-    report(99,'V17 Full Graph / Call・CFG・Type・Taint・Resource・Game'); await yieldNow();
+    runV19MassivePrecision(text,lang,issues,htmlInfo);
+    if(lang==='html'){
+      for(const st of (htmlInfo?.styles||[])) runV19MassivePrecision(st.content,'css',issues,htmlInfo);
+      for(const sc of (htmlInfo?.scripts||[])){ if(sc.external) continue; runV19MassivePrecision(sc.content,'js',issues,htmlInfo); }
+    }
+    report(99,'V19 言語別大量ルール / 精度統合'); await yieldNow();
     const finalInfo=lang==='html'?htmlInfo:null;
     let finalIssues=finalizeStaticIssues(v14Firewall(dedupeIssues(issues),lang,text),lang,text,finalInfo);
     finalIssues=runV11PostPrecisionFilter(finalIssues,lang,text);
@@ -3851,7 +3893,7 @@ function runMaxAccuracyLayer(text,lang,issues,htmlInfo){
       result=await runScanTextAsync(text,null,state.mode==='file'?hintExt:null,(p,label)=>setScanProgress(p,label));
       await nextScanFrame(()=>{
         state.lastScan=result;
-        renderResults(result.issues,result.lang,result.parser);
+        renderResults(result.issues,result.lang,result.parser,result.detection);
       });
     }catch(err){
       console.error('[LintBench] scan failed',err);
@@ -5295,6 +5337,350 @@ function runMaxAccuracyLayer(text,lang,issues,htmlInfo){
     if(['java','c','cpp','cs','go','rust','php','ruby','kotlin','swift'].includes(lang))v15Compiled(text,lang,issues);
   }
 
+
+  /* ================================================================
+     v19: Massive Language-Aware Precision Layer
+     目的:
+       1) 自動言語判定の結果に基づくルール分岐
+       2) 既存層と異なる観点を大量追加
+       3) コメント/文字列だけの行をできるだけ除外
+       4) 同じ原因を量産しないよう evidence + dedupe に任せる
+     ================================================================= */
+  function runV19MassivePrecision(text,lang,issues,htmlInfo){
+    const lines=String(text||'').split('\n');
+    const emit=(severity,line,kind,title,desc,confidence='MEDIUM',snippet='',before='',after='',score)=>{
+      const n=Math.max(1,Number(line)||1);
+      const obj={severity,line:n,kind,title,desc,snippet:snippet||lines[n-1]||'',confidence,before,after};
+      if(Number.isFinite(score)) obj.confidenceScore=score;
+      pushIssue(issues,obj);
+    };
+    const codeLine=(s)=>{
+      let x=String(s||'');
+      x=x.replace(/^\s*\/\/.*$/,'').replace(/^\s*#(?!include|define|if|elif|else|endif).*/,'');
+      x=x.replace(/\/\*.*?\*\//g,' ');
+      return x;
+    };
+    const runRules=(ruleSet)=>{
+      for(let i=0;i<lines.length;i++){
+        const raw=lines[i], c=codeLine(raw);
+        if(!c.trim()) continue;
+        for(const r of ruleSet){
+          if(r.re.test(c)){
+            emit(r.sev,i+1,r.kind,r.title,r.desc,r.conf||'MEDIUM',raw,r.before||'',r.after||'',r.score);
+          }
+        }
+      }
+    };
+
+    if(lang==='js'||lang==='ts'){
+      const rules=[
+        {re:/\b(?:eval|Function)\s*\(/,sev:'CRITICAL',kind:'Security',title:'動的コード評価APIを使用しています',desc:'文字列をコードとして実行する経路はコードインジェクションの原因になります。',conf:'HIGH',score:95},
+        {re:/\b(?:setTimeout|setInterval)\s*\(\s*["'`]/,sev:'HIGH',kind:'Security',title:'文字列形式のタイマー実行があります',desc:'タイマーへ文字列を渡すと動的コード評価と同様のリスクになります。関数参照を使用してください。',conf:'HIGH',score:92},
+        {re:/\binnerHTML\s*=/,sev:'MEDIUM',kind:'DOM/XSS',title:'innerHTMLへの直接代入を検出しました',desc:'外部入力が混入するとHTMLインジェクションにつながるため、値の由来を確認してください。',conf:'MEDIUM',score:58},
+        {re:/\bdocument\.write\s*\(/,sev:'MEDIUM',kind:'DOM',title:'document.writeを使用しています',desc:'後からDOMを書き換える用途では予期せぬ文書破壊を起こしやすいため、DOM APIを検討してください。',conf:'MEDIUM',score:54},
+        {re:/\b(?:localStorage|sessionStorage)\.[A-Za-z_$][\w$]*\s*=\s*/,sev:'LOW',kind:'Storage',title:'Storageへの直接プロパティ代入を検出しました',desc:'setItem/getItemを使う意図だった場合はAPI利用方法を確認してください。',conf:'MEDIUM',score:38},
+        {re:/\bNaN\s*={2,3}\b|\b={2,3}\s*NaN\b/,sev:'HIGH',kind:'Number',title:'NaNを等価比較しています',desc:'NaNは自己比較でも一致しません。Number.isNaN()などを検討してください。',conf:'CERTAIN',score:99},
+        {re:/\bparseInt\s*\([^,\n\)]*\)/,sev:'LOW',kind:'API',title:'parseIntの基数指定を確認してください',desc:'文字列の基数を明示すると解釈が安定します。',conf:'HIGH',score:84,after:'parseInt(value, 10)'},
+        {re:/\b(?:setTimeout|setInterval)\s*\(\s*[A-Za-z_$][\w$]*\s*\(\s*.*\)\s*,/,sev:'HIGH',kind:'Async',title:'タイマーへ関数の戻り値を渡しています',desc:'foo()は登録時に実行され、戻り値がタイマーへ渡る可能性があります。',conf:'HIGH',score:88},
+        {re:/\bnew\s+Promise\s*\(\s*async\b/,sev:'HIGH',kind:'Async',title:'async Promise executorを使用しています',desc:'executor内の例外・reject経路を不必要に複雑化します。',conf:'HIGH',score:93},
+        {re:/\bPromise\.(?:all|race|allSettled|any)\s*\(\s*\[\s*\]\s*\)/,sev:'LOW',kind:'Async',title:'空のPromise集合を渡しています',desc:'allは即時fulfilled、race/anyはsettleしない等、APIごとに結果が大きく異なります。',conf:'HIGH',score:82},
+        {re:/\bPromise\.race\s*\(\s*\[\s*\]\s*\)/,sev:'HIGH',kind:'Async',title:'空のPromise.raceがあります',desc:'競合対象がないためPromiseがsettleしません。',conf:'CERTAIN',score:100},
+        {re:/\b(?:array|items|list|arr)\.forEach\s*\(\s*(?:async\s+)?/,sev:'INFO',kind:'Async',title:'forEachの非同期処理を確認してください',desc:'非同期コールバックを順番に待つ用途ではfor...of等が必要です。',conf:'LOW',score:25},
+        {re:/\b[A-Za-z_$][\w$]*\.map\s*\(\s*async\b/,sev:'MEDIUM',kind:'Async',title:'async mapの結果がPromise配列になります',desc:'呼び出し側がawait Promise.all(...)を必要としているか確認してください。',conf:'HIGH',score:86},
+        {re:/\bawait\s+\b(?:Array|Promise)\.all\s*\(/,sev:'INFO',kind:'Async',title:'Promise集合の待機箇所を検査しています',desc:'並列実行意図と失敗時の扱いを確認してください。',conf:'LOW',score:18},
+        {re:/\b(?:for|while)\s*\([^)]*\)\s*\{\s*[^{}]*\bawait\b/,sev:'LOW',kind:'Async/Performance',title:'ループ内awaitを検出しました',desc:'逐次待機になり、独立タスクなら処理時間が増える可能性があります。',conf:'MEDIUM',score:34},
+        {re:/\b(?:typeof\s+[A-Za-z_$][\w$]*\s*===?\s*["'](?:object|function|undefined|number|string|boolean)["'])/,sev:'INFO',kind:'Type Guard',title:'typeofによる型分岐を検出しました',desc:'null判定やobject関数の境界条件も合わせて確認してください。',conf:'LOW',score:15},
+        {re:/\btypeof\s+[A-Za-z_$][\w$]*\s*===?\s*["']object["']/,sev:'LOW',kind:'Type Guard',title:'typeof object判定でnull境界を確認してください',desc:'typeof nullはobjectのため、null除外が別途必要な場合があります。',conf:'HIGH',score:85},
+        {re:/\bJSON\.parse\s*\(\s*(?:localStorage|sessionStorage)\.getItem\s*\(/,sev:'MEDIUM',kind:'Storage',title:'Storage値をJSON.parseへ直結しています',desc:'キー未存在時のnullや破損JSONで例外になる経路を確認してください。',conf:'HIGH',score:87},
+        {re:/\bJSON\.stringify\s*\(\s*undefined\s*\)/,sev:'LOW',kind:'Serialization',title:'undefinedをJSON.stringifyしています',desc:'結果はundefinedになり保存・送信処理で意図せず欠落することがあります。',conf:'CERTAIN',score:98},
+        {re:/\bObject\.(?:keys|values|entries)\s*\(\s*(?:null|undefined)\s*\)/,sev:'CRITICAL',kind:'Runtime',title:'null/undefinedをObject APIへ渡しています',desc:'確実にTypeErrorになる経路です。',conf:'CERTAIN',score:100},
+        {re:/\bArray\.from\s*\(\s*(?:null|undefined)\s*\)/,sev:'CRITICAL',kind:'Runtime',title:'null/undefinedをArray.fromへ渡しています',desc:'iterableではないため実行時例外になります。',conf:'CERTAIN',score:100},
+        {re:/\bMath\.(?:max|min)\s*\(\s*\[\s*.*\]\s*\)/,sev:'LOW',kind:'API',title:'Math.max/minへ配列をそのまま渡しています',desc:'引数展開が必要な意図ならMath.max(...arr)等を確認してください。',conf:'MEDIUM',score:56},
+        {re:/\bArray\(\s*-\d+(?:\.\d+)?\s*\)/,sev:'CRITICAL',kind:'Array',title:'負のArray長を指定しています',desc:'RangeErrorになる可能性があります。',conf:'CERTAIN',score:100},
+        {re:/\bnew\s+Array\(\s*[^)]*0x[A-Fa-f0-9]+\s*\)/,sev:'LOW',kind:'Array/Memory',title:'大きな配列長の生成を確認してください',desc:'16進値をサイズとして使う場合はメモリ使用量を確認してください。',conf:'LOW',score:30},
+        {re:/\b(?:for|while)\s*\([^)]*\+\+\s*\)/,sev:'INFO',kind:'Loop',title:'ループ更新式を確認してください',desc:'境界値が正しく収束するかを確認してください。',conf:'LOW',score:12},
+        {re:/\bfor\s*\(\s*const?\s+\w+\s+in\s+\w+\s*\)/,sev:'LOW',kind:'Iteration',title:'for...inで配列を反復している可能性があります',desc:'配列値の反復が目的ならfor...ofや通常のindexループが安全です。',conf:'MEDIUM',score:44},
+        {re:/\b(?:delete\s+\w+\[[^\]]+\]|\w+\[[^\]]+\]\s*=\s*undefined)\b/,sev:'LOW',kind:'Array',title:'配列要素削除による疎配列化を確認してください',desc:'lengthや反復結果が意図と異なることがあります。',conf:'MEDIUM',score:42},
+        {re:/\bObject\.assign\s*\(\s*\w+\s*,\s*\w+\s*\)/,sev:'INFO',kind:'Mutation',title:'Object.assignによる破壊的マージを確認してください',desc:'第1引数が既存オブジェクトを変更することを意図しているか確認してください。',conf:'LOW',score:18},
+        {re:/\bArray\.prototype\.(?:sort|reverse|splice)\.call\s*\(/,sev:'LOW',kind:'Mutation',title:'破壊的配列操作を検出しました',desc:'共有配列を変更していないか確認してください。',conf:'MEDIUM',score:44},
+        {re:/\.(?:sort|reverse|splice)\s*\(/,sev:'INFO',kind:'Mutation',title:'破壊的配列メソッドを使用しています',desc:'参照共有している配列なら意図しない状態変更が起こります。',conf:'LOW',score:20},
+        {re:/\b(?:x|y|i|j|index|idx)\s*\/\s*0\b/,sev:'CRITICAL',kind:'Arithmetic',title:'0除算を検出しました',desc:'数値結果がInfinity等になる可能性があります。',conf:'CERTAIN',score:100},
+        {re:/\bNumber\.toFixed\s*\(\s*(?:-\d+|1\d\d|\d{3,})\s*\)/,sev:'CRITICAL',kind:'API',title:'toFixedの桁数が範囲外です',desc:'桁数は0〜100でなければなりません。',conf:'CERTAIN',score:100},
+        {re:/\b(?:encodeURI|encodeURIComponent|decodeURI|decodeURIComponent)\s*\(\s*["'][^"']*%[^"']*["']\s*\)/,sev:'MEDIUM',kind:'URI',title:'URIエンコード文字列を確認してください',desc:'不正な%エスケープはURIErrorになります。',conf:'MEDIUM',score:62},
+        {re:/\bBigInt\s*\(\s*["'][^"']*\.[^"']+["']\s*\)/,sev:'CRITICAL',kind:'BigInt',title:'小数形式の文字列をBigIntへ渡しています',desc:'BigIntは小数表記を受理しません。',conf:'CERTAIN',score:100},
+        {re:/\bDate\.parse\s*\(\s*["'](?:invalid|undefined|null)["']\s*\)/i,sev:'MEDIUM',kind:'Date',title:'無効な日付文字列をparseしています',desc:'NaNになる可能性があります。',conf:'HIGH',score:90},
+        {re:/\bnew\s+Date\s*\(\s*["'](?:invalid|undefined|null)["']\s*\)/i,sev:'MEDIUM',kind:'Date',title:'無効な日付文字列を生成しています',desc:'Invalid Dateになるため後段処理を確認してください。',conf:'HIGH',score:90},
+        {re:/\b(?:Math\.random\(\)\s*\*\s*0|Math\.floor\([^)]*\)\s*\%\s*0)\b/,sev:'CRITICAL',kind:'Random',title:'乱数範囲が0で固定される式があります',desc:'期待したランダム値が生成されません。',conf:'CERTAIN',score:100},
+        {re:/\b(?:Math\.floor|Math\.round)\s*\(\s*Math\.random\(\)\s*\*\s*(\w+\.length)\s*\+\s*1\s*\)/,sev:'HIGH',kind:'Random/Bounds',title:'ランダム配列添字がlengthを超える可能性があります',desc:'0〜length-1ではなく1〜lengthになる式はundefinedを引く可能性があります。',conf:'HIGH',score:94},
+        {re:/\b(?:document|getComputedStyle)\.[A-Za-z_$][\w$]*\s*\(/,sev:'LOW',kind:'DOM',title:'DOM API名を確認してください',desc:'プロパティとメソッドの取り違えがないか確認してください。',conf:'LOW',score:24},
+        {re:/\bgetElementById\s*\(\s*["'][^"']*["']\s*\)\s*\./,sev:'INFO',kind:'DOM Nullability',title:'getElementById後のnull境界を確認してください',desc:'対象要素が存在しない場合はnullになります。',conf:'LOW',score:20},
+        {re:/\bquerySelector(?:All)?\s*\(\s*["']#[^"']+["']\s*\)\s*==?\s*null\b/,sev:'INFO',kind:'DOM',title:'DOM参照のnull判定を検出しました',desc:'存在しないDOM要素への後続アクセスがないか確認してください。',conf:'LOW',score:12},
+        {re:/\baddEventListener\s*\(\s*["'][^"']+["']\s*,\s*function\s*\(/,sev:'LOW',kind:'DOM Event',title:'無名イベント関数を登録しています',desc:'後でremoveEventListenerする設計なら関数参照を保持する必要があります。',conf:'MEDIUM',score:52},
+        {re:/\bremoveEventListener\s*\(\s*["'][^"']+["']\s*,\s*(?:function|\([^)]*\)\s*=>)/,sev:'HIGH',kind:'DOM Event',title:'removeEventListenerへ新しい関数インスタンスを渡しています',desc:'登録時と同一関数参照でない限り解除できません。',conf:'HIGH',score:94},
+        {re:/\b(?:fetch|axios\.(?:get|post|put|delete))\s*\(/,sev:'INFO',kind:'Network',title:'外部通信APIを検出しました',desc:'タイムアウト、AbortSignal、失敗時処理を確認してください。',conf:'LOW',score:14},
+        {re:/\bfetch\s*\([^)]*\)\s*\.then\s*\([^)]*\)\s*;(?!\s*catch)/,sev:'LOW',kind:'Async/Error',title:'fetchチェーンに失敗処理がない可能性があります',desc:'ネットワーク失敗時のPromise rejectionを処理しているか確認してください。',conf:'MEDIUM',score:46},
+        {re:/\b(?:console\.log|console\.debug|console\.info)\s*\([^)]*\b(?:password|token|secret|api[_-]?key)\b/i,sev:'HIGH',kind:'Security/Logging',title:'機密情報らしき値をログ出力しています',desc:'認証情報がブラウザコンソール等へ露出する可能性があります。',conf:'HIGH',score:90},
+        {re:/\b(?:password|token|secret|api[_-]?key)\s*[:=]\s*["'][^"']{4,}["']/i,sev:'HIGH',kind:'Security',title:'機密情報らしき値をハードコードしています',desc:'ソースへ認証情報を埋め込まず、適切な秘密管理を使用してください。',conf:'HIGH',score:94},
+        {re:/\b(?:location\.href|location\.assign|location\.replace)\s*=\s*[^;]+(?:user|input|query|param)/i,sev:'HIGH',kind:'Open Redirect',title:'外部入力からlocationを変更している可能性があります',desc:'未検証URLならオープンリダイレクトにつながる可能性があります。',conf:'MEDIUM',score:62},
+        {re:/\b(?:document\.cookie|localStorage|sessionStorage)\b/,sev:'INFO',kind:'Client Storage',title:'クライアント保存領域を使用しています',desc:'機密情報の保存可否、XSS時の露出、期限を確認してください。',conf:'LOW',score:12},
+        {re:/\bfor\s*\(\s*;\s*;\s*\)\b/,sev:'HIGH',kind:'Control Flow',title:'無条件forループを検出しました',desc:'break/return/throw等の必ず到達する終了条件があるか確認してください。',conf:'MEDIUM',score:64},
+        {re:/\bwhile\s*\(\s*true\s*\)/,sev:'MEDIUM',kind:'Control Flow',title:'while(true)を検出しました',desc:'終了条件が別の経路にあることを確認してください。',conf:'MEDIUM',score:50},
+        {re:/\bif\s*\(\s*true\s*\)\s*\{/,sev:'LOW',kind:'Control Flow',title:'常に真のif条件があります',desc:'デバッグ残骸や到達不能elseがないか確認してください。',conf:'CERTAIN',score:96},
+        {re:/\bif\s*\(\s*false\s*\)\s*\{/,sev:'LOW',kind:'Control Flow',title:'常に偽のif条件があります',desc:'内部処理は到達不能です。',conf:'CERTAIN',score:96},
+        {re:/\b(?:return|throw)\b[^;]*;\s*[A-Za-z_$][\w$]*\s*=/,sev:'LOW',kind:'Control Flow',title:'return/throw後に文が続いている可能性があります',desc:'到達不能コードになっていないか確認してください。',conf:'HIGH',score:84},
+        {re:/\bcase\s+["']?[^:]+["']?\s*:\s*(?:case|default)\b/,sev:'LOW',kind:'Switch',title:'switch caseの処理が連続しています',desc:'fall-throughを意図しているか確認してください。',conf:'MEDIUM',score:42},
+        {re:/\bdefault\s*:\s*;\s*\}/,sev:'INFO',kind:'Switch',title:'空のdefault節があります',desc:'想定外値を無視する設計なら意図を確認してください。',conf:'LOW',score:16},
+        {re:/\bcatch\s*\([^)]*\)\s*\{\s*\}/,sev:'MEDIUM',kind:'Error Handling',title:'空のcatchブロックがあります',desc:'例外を握り潰しているため原因追跡が困難になります。',conf:'HIGH',score:86}
+      ];
+      runRules(rules);
+
+      if(window.acorn&&typeof window.acorn.parse==='function'){
+        const parsed=parseJSWithAST(text);
+        if(parsed.ast){
+          const parents=new Map(), funcs=new Map(), vars=new Map(), writes=new Map(), reads=new Map();
+          astWalk(parsed.ast,(n,p)=>{
+            if(!n||!n.type)return;
+            parents.set(n,p||null);
+            if(n.type==='FunctionDeclaration'&&n.id?.name) funcs.set(n.id.name,n);
+            if(n.type==='VariableDeclarator'&&n.id?.type==='Identifier') vars.set(n.id.name,n);
+            if(n.type==='AssignmentExpression'&&n.left?.type==='Identifier') writes.set(n.left.name,(writes.get(n.left.name)||0)+1);
+            if(n.type==='Identifier'&&(!p||p.type!=='VariableDeclarator')) reads.set(n.name,(reads.get(n.name)||0)+1);
+          });
+          const lineOf=n=>Math.max(1,n?.loc?.start?.line||1);
+          const lineText=n=>lines[lineOf(n)-1]||'';
+          astWalk(parsed.ast,(n,p)=>{
+            if(n.type==='BinaryExpression' && ['===','!==','==','!='].includes(n.operator)){
+              if((n.left?.type==='Literal'&&n.right?.type==='Literal')){
+                const a=n.left.value,b=n.right.value;
+                let value=null;
+                if(n.operator==='==='||n.operator==='==') value=a===b;
+                if(n.operator==='!=='||n.operator==='!=') value=a!==b;
+                if(value===true) emit('LOW',lineOf(n),'Constant Branch','常に真になる比較式があります','条件分岐が不要または比較対象の記述ミスでないか確認してください。','HIGH',lineText(n),'','',91);
+                if(value===false) emit('LOW',lineOf(n),'Constant Branch','常に偽になる比較式があります','この分岐は到達しません。','HIGH',lineText(n),'','',91);
+              }
+            }
+            if(n.type==='AssignmentExpression'&&n.left?.type==='Identifier'){
+              const decl=vars.get(n.left.name);
+              if(decl?.kind==='const') emit('CRITICAL',lineOf(n),'Scope','const変数へ再代入しています','constの再代入はTypeErrorになります。','CERTAIN',lineText(n),'','',100);
+            }
+            if(n.type==='CallExpression'&&n.callee?.type==='Identifier'&&n.callee.name==='setTimeout'&&n.arguments?.[0]?.type==='CallExpression'){
+              emit('HIGH',lineOf(n),'Async','setTimeoutの第1引数を即時実行しています','コールバックではなく戻り値を渡してしまう可能性があります。','HIGH',lineText(n),'','',94);
+            }
+            if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'&&n.callee.property?.name==='map'&&n.arguments?.[0]?.type==='ArrowFunctionExpression'){
+              const body=n.arguments[0].body;
+              if(body?.type==='BlockStatement'&&!body.body.some(st=>st.type==='ReturnStatement'))
+                emit('MEDIUM',lineOf(n),'Array','mapコールバックが値をreturnしていません','結果配列がundefinedで埋まる可能性があります。','HIGH',lineText(n),'','',88);
+            }
+            if(n.type==='LogicalExpression'&&(n.operator==='&&'||n.operator==='||')){
+              if(n.left?.type==='Literal'&&n.right?.type==='Literal'){
+                const a=Boolean(n.left.value),b=Boolean(n.right.value);
+                const v=n.operator==='&&'?(a&&b):(a||b);
+                emit('INFO',lineOf(n),'Constant Expression','論理式を定数評価できます','デバッグ条件や到達性を確認してください。','LOW',lineText(n),'','',16);
+              }
+            }
+            if(n.type==='CallExpression'&&n.callee?.type==='MemberExpression'&&n.callee.property?.name==='toLocaleString'&&n.arguments.length>2)
+              emit('LOW',lineOf(n),'API','toLocaleStringの引数数を確認してください','利用するオブジェクト種別により受け付ける引数が異なります。','LOW',lineText(n),'','',32);
+          });
+        }
+      }
+
+      if(lang==='ts'){
+        runRules([
+          {re:/\b(?:any)\b/,sev:'LOW',kind:'TypeScript',title:'any型を使用しています',desc:'型チェックが弱くなり、潜在バグを見逃しやすくなります。',conf:'LOW',score:28},
+          {re:/\bas\s+any\b/,sev:'MEDIUM',kind:'TypeScript',title:'as anyで型チェックを回避しています',desc:'型不整合を隠していないか確認してください。',conf:'MEDIUM',score:54},
+          {re:/@ts-ignore\b/,sev:'MEDIUM',kind:'TypeScript',title:'@ts-ignoreで型エラーを抑制しています',desc:'抑制理由と将来の型崩れを確認してください。',conf:'HIGH',score:78},
+          {re:/\b[A-Za-z_$][\w$]*!\.[A-Za-z_$]/,sev:'MEDIUM',kind:'TypeScript',title:'non-null assertion後のプロパティアクセスがあります',desc:'null可能値でないことを保証できるか確認してください。',conf:'MEDIUM',score:58},
+          {re:/\b(?:const|let)\s+\w+\s*:\s*never\b/,sev:'LOW',kind:'TypeScript',title:'never型の値変数を確認してください',desc:'到達不能値の意図でないなら型設計を確認してください。',conf:'MEDIUM',score:40},
+          {re:/\b(?:unknown|any)\s*\&\s*never\b/,sev:'LOW',kind:'TypeScript',title:'neverとの交差型があります',desc:'結果型がneverになる意図か確認してください。',conf:'LOW',score:20}
+        ]);
+      }
+    }
+
+    if(lang==='py'){
+      runRules([
+        {re:/^\s*(?:async\s+def)\b.*:\s*$[\s\S]{0,250}\btime\.sleep\s*\(/m,sev:'MEDIUM',kind:'Async',title:'async関数内でtime.sleepを使用している可能性があります',desc:'イベントループをブロックするため、asyncio.sleep等が必要か確認してください。',conf:'MEDIUM',score:62},
+        {re:/\bdef\s+\w+\s*\([^)]*(?:=\s*(?:\[\]|\{\}|\bset\(\))),?[^)]*\)/,sev:'HIGH',kind:'Python State',title:'可変オブジェクトをデフォルト引数に使用しています',desc:'呼び出し間で同じオブジェクトが共有されます。',conf:'HIGH',score:92},
+        {re:/\b(?:is|is not)\s+(?:None|True|False)\b/,sev:'INFO',kind:'Python Style',title:'is/is notによる単一値比較を検出しました',desc:'None/True/Falseでは適切ですが、他のリテラルへのis使用なら誤りです。',conf:'LOW',score:18},
+        {re:/\b(?:==|!=)\s+(?:None|True|False)\b/,sev:'LOW',kind:'Python Style',title:'None/True/Falseとの等価比較を使用しています',desc:'Noneはis None、真偽値は文脈に合った書き方を確認してください。',conf:'MEDIUM',score:48},
+        {re:/\bexcept\s+Exception\s*(?:as\s+\w+)?\s*:\s*(?:#.*)?$/i,sev:'LOW',kind:'Error Handling',title:'広すぎるException捕捉があります',desc:'本当に全例外を捕捉する必要があるか確認してください。',conf:'MEDIUM',score:44},
+        {re:/\bexcept\s*:\s*(?:#.*)?$/,sev:'LOW',kind:'Error Handling',title:'裸のexceptがあります',desc:'KeyboardInterrupt等まで捕捉するため、例外型の指定を推奨します。',conf:'MEDIUM',score:42},
+        {re:/\beval\s*\(\s*input\s*\(/,sev:'CRITICAL',kind:'Security',title:'inputをevalへ直接渡しています',desc:'ユーザー入力をPythonコードとして実行するため危険です。',conf:'CERTAIN',score:100},
+        {re:/\bexec\s*\(\s*input\s*\(/,sev:'CRITICAL',kind:'Security',title:'inputをexecへ直接渡しています',desc:'ユーザー入力をコードとして実行します。',conf:'CERTAIN',score:100},
+        {re:/\bsubprocess\.[A-Za-z_]+\([^)]*\bshell\s*=\s*True\b/,sev:'HIGH',kind:'Security',title:'shell=Trueのsubprocess呼び出しがあります',desc:'外部入力が混ざるとコマンドインジェクションにつながります。',conf:'HIGH',score:90},
+        {re:/\bos\.system\s*\(/,sev:'HIGH',kind:'Security',title:'os.systemを使用しています',desc:'引数の外部入力混入によるコマンドインジェクション経路を確認してください。',conf:'HIGH',score:86},
+        {re:/\bopen\s*\([^)]*(?:["'][^"']+["'])[^)]*\)\s*(?!.*\bwith\b)/,sev:'LOW',kind:'Resource',title:'open()をwith文なしで使用しています',desc:'例外時も確実にcloseできる構造を推奨します。',conf:'MEDIUM',score:45},
+        {re:/\bassert\s+/,sev:'INFO',kind:'Python Runtime',title:'assertを実行時検証に使用しています',desc:'最適化実行ではassertが無効化される場合があります。',conf:'HIGH',score:78},
+        {re:/\bfrom\s+\*\s+import\s+\*/,sev:'LOW',kind:'Python Namespace',title:'ワイルドカードimportがあります',desc:'名前衝突や可読性低下につながるため、必要な名前を明示してください。',conf:'MEDIUM',score:40},
+        {re:/\bexcept\s+\w+\s+as\s+\w+\s*:\s*pass\s*$/,sev:'LOW',kind:'Error Handling',title:'例外をpassだけで処理しています',desc:'無視が意図的なら理由を残し、少なくともログ要否を確認してください。',conf:'MEDIUM',score:42},
+        {re:/\bwhile\s+True\s*:\s*$/,sev:'MEDIUM',kind:'Control Flow',title:'while Trueループがあります',desc:'必ずbreakされる経路があるか確認してください。',conf:'MEDIUM',score:48}
+      ]);
+    }
+
+    if(lang==='json'){
+      try{
+        const root=JSON.parse(text);
+        const walk=(v,path,depth)=>{
+          if(depth>80)return;
+          if(Array.isArray(v)){
+            if(v.length>100000) emit('MEDIUM',1,'JSON/Size','巨大配列を検出しました','ブラウザ内パース時のメモリ使用量を確認してください。','MEDIUM',path,'','',58);
+            v.forEach((x,i)=>walk(x,path+'['+i+']',depth+1));
+          }else if(v&&typeof v==='object'){
+            for(const [k,x] of Object.entries(v)){
+              if(/^\s*$/.test(k)) emit('LOW',1,'JSON','空キー名があります','参照コードとの不一致を確認してください.','MEDIUM',path);
+              if(/^(?:__proto__|constructor|prototype)$/i.test(k)) emit('HIGH',1,'JSON Security','特殊プロトタイプキーを検出しました','オブジェクトへ取り込む処理ではprototype pollutionにつながる可能性があります。','MEDIUM',path,'','',72);
+              walk(x,path+'.'+k,depth+1);
+            }
+          }
+        };
+        walk(root,'$',0);
+      }catch(_){}
+    }
+
+    if(lang==='sql'){
+      runRules([
+        {re:/\b(?:UPDATE|DELETE)\b(?![\s\S]{0,180}\bWHERE\b)/i,sev:'HIGH',kind:'SQL Safety',title:'UPDATE/DELETEにWHEREがありません',desc:'全行更新・削除の可能性があります。',conf:'HIGH',score:94},
+        {re:/\bSELECT\s+\*/i,sev:'LOW',kind:'SQL',title:'SELECT * を使用しています',desc:'取得列が意図せず増える可能性があります。',conf:'HIGH',score:82},
+        {re:/\bDROP\s+(?:TABLE|DATABASE|SCHEMA)\b/i,sev:'HIGH',kind:'SQL Safety',title:'破壊的DDLを検出しました',desc:'本番経路で実行されないことを確認してください。',conf:'MEDIUM',score:66},
+        {re:/\bTRUNCATE\s+TABLE\b/i,sev:'HIGH',kind:'SQL Safety',title:'TRUNCATE TABLEを検出しました',desc:'テーブル全行を削除する操作です。',conf:'CERTAIN',score:99},
+        {re:/\bGRANT\s+ALL\b|\bWITH\s+GRANT\s+OPTION\b/i,sev:'HIGH',kind:'SQL Security',title:'強いDB権限付与を検出しました',desc:'最小権限原則に沿っているか確認してください。',conf:'MEDIUM',score:68},
+        {re:/\b(?:SELECT|UPDATE|DELETE|INSERT)\b[\s\S]*\+\s*["']|["']\s*\+\s*[\s\S]*\b(?:SELECT|UPDATE|DELETE|INSERT)\b/i,sev:'HIGH',kind:'SQL Injection',title:'SQL文字列連結によるクエリ生成の可能性があります',desc:'外部入力が混ざる場合はパラメータ化を使用してください。',conf:'MEDIUM',score:76},
+        {re:/\bOR\s+1\s*=\s*1\b|\bUNION\s+ALL?\s+SELECT\b/i,sev:'HIGH',kind:'SQL Injection',title:'SQLインジェクション典型パターンを検出しました',desc:'入力連結経路ならパラメータ化を検討してください。',conf:'HIGH',score:90},
+        {re:/\bNOT\s+IN\s*\(\s*SELECT\b/i,sev:'LOW',kind:'SQL Semantics',title:'NOT INサブクエリを使用しています',desc:'NULLの混入で期待と異なる結果になることがあるため、NOT EXISTS等と意味を確認してください。',conf:'MEDIUM',score:44},
+        {re:/\bLIKE\s+["']%[^"']+%["']/i,sev:'LOW',kind:'SQL Performance',title:'前方ワイルドカードLIKEを検出しました',desc:'インデックスが効きにくい条件です。データ量が多い場合は性能を確認してください。',conf:'MEDIUM',score:36},
+        {re:/\bORDER\s+BY\s+\d+\b/i,sev:'LOW',kind:'SQL',title:'ORDER BYの列番号指定を使用しています',desc:'列追加で意味が変わるため、重要クエリでは列名指定を確認してください。',conf:'LOW',score:26},
+        {re:/\bCOUNT\s*\(\s*1\s*\)/i,sev:'INFO',kind:'SQL',title:'COUNT(1)を使用しています',desc:'意味上の問題は通常ありませんが、DB方言や既存規約との一貫性を確認してください。',conf:'LOW',score:12},
+        {re:/\bSELECT\b(?![\s\S]*\bFROM\b)/i,sev:'MEDIUM',kind:'SQL',title:'SELECTにFROMがない形式を検出しました',desc:'定数SELECTなら合法ですが、テーブル取得の意図なら構文を確認してください。',conf:'MEDIUM',score:48}
+      ]);
+    }
+
+    if(lang==='html'){
+      const htmlLines=lines;
+      runRules([
+        {re:/<a\b[^>]*\bhref\s*=\s*["']javascript:/i,sev:'CRITICAL',kind:'Security',title:'a要素のhrefにjavascriptスキームがあります',desc:'スクリプト実行経路になるため削除または安全なイベント処理へ変更してください。',conf:'CERTAIN',score:100},
+        {re:/<form\b[^>]*\bmethod\s*=\s*["']post["'][^>]*>/i,sev:'LOW',kind:'HTML Form',title:'POSTフォームの送信先を確認してください',desc:'actionが未指定なら現在URLなどへ送信される可能性があります。',conf:'LOW',score:32},
+        {re:/<input\b[^>]*\btype\s*=\s*["'](?:text|email|password)["'][^>]*>/i,sev:'LOW',kind:'Accessibility',title:'入力欄とlabelの関連付けを確認してください',desc:'for/idやaria-label等によるアクセシブルな名前を確認してください。',conf:'LOW',score:28},
+        {re:/<button\b(?![^>]*\btype\s*=)[^>]*>/i,sev:'MEDIUM',kind:'HTML Form',title:'buttonのtypeが未指定です',desc:'form内ではsubmitとして扱われ、意図しない送信の原因になります。',conf:'HIGH',score:84},
+        {re:/<img\b[^>]*\bsrc\s*=\s*["']["']/i,sev:'HIGH',kind:'HTML',title:'imgのsrcが空です',desc:'画像読み込み失敗や不要なリクエストの原因になります。',conf:'CERTAIN',score:99},
+        {re:/<script\b[^>]*\bsrc\s*=\s*["']https?:\/\//i,sev:'LOW',kind:'Security',title:'外部scriptを直接読み込んでいます',desc:'供給元・SRI・CSP方針を確認してください。',conf:'LOW',score:24},
+        {re:/<iframe\b(?![^>]*\bsandbox\s*=)[^>]*>/i,sev:'LOW',kind:'Security',title:'iframeのsandbox指定を確認してください',desc:'信頼できない埋め込みなら権限を制限してください。',conf:'LOW',score:30},
+        {re:/<meta\b[^>]*http-equiv\s*=\s*["']refresh["']/i,sev:'LOW',kind:'HTML Security',title:'meta refreshを使用しています',desc:'意図しないリダイレクトやUX問題を確認してください。',conf:'LOW',score:30},
+        {re:/<input\b[^>]*\bautocomplete\s*=\s*["']off["']/i,sev:'LOW',kind:'Accessibility/Security',title:'autocomplete=offを確認してください',desc:'パスワード管理やブラウザ補完を不必要に無効化していないか確認してください。',conf:'LOW',score:28},
+        {re:/<a\b[^>]*\btarget\s*=\s*["']_blank["'][^>]*>/i,sev:'LOW',kind:'Security',title:'target=_blankのリンクを検出しました',desc:'rel=noopener等でopener経由の問題を防いでください。',conf:'MEDIUM',score:40},
+        {re:/<html\b(?![^>]*\blang\s*=)/i,sev:'LOW',kind:'Accessibility',title:'html要素のlang属性がありません',desc:'スクリーンリーダー等の言語判定のためlang指定を推奨します。',conf:'HIGH',score:82},
+        {re:/<head\b[^>]*>[\s\S]{0,1500}<(?:script|style)\b/i,sev:'INFO',kind:'HTML',title:'head内に実行・スタイル要素があります',desc:'配置自体は合法ですが、描画ブロックや読み込み順を確認してください。',conf:'LOW',score:14},
+        {re:/<canvas\b(?![^>]*\baria-label\b)[^>]*>/i,sev:'LOW',kind:'Accessibility',title:'canvasの代替説明を確認してください',desc:'canvas内容を伝える代替手段が必要な場合があります。',conf:'LOW',score:26}
+      ]);
+
+      const htmlInfoLocal=htmlInfo;
+      if(htmlInfoLocal){
+        const idSet=new Set(htmlInfoLocal.ids?.keys?.()||[]);
+        for(const r of htmlInfoLocal.refs||[]){
+          if(!idSet.has(r.id)) emit('HIGH',r.line,'DOM Reference','HTML内リンク先IDが見つかりません','#'+r.id+' を参照していますが、対応するidが見つかりません。','HIGH',htmlLines[r.line-1]||'','','',88);
+        }
+      }
+    }
+
+    if(lang==='css'){
+      runRules([
+        {re:/\bcalc\([^;{}]*\/\s*0(?:\D|$)/i,sev:'CRITICAL',kind:'CSS Arithmetic',title:'calc()内で0除算の可能性があります',desc:'CSS計算式が無効になります。',conf:'CERTAIN',score:100},
+        {re:/url\(\s*["']?javascript:/i,sev:'CRITICAL',kind:'Security',title:'CSS URLにjavascriptスキームがあります',desc:'スクリプト実行経路になるため削除してください。',conf:'CERTAIN',score:100},
+        {re:/^[^{}]+\{[^{}]*\b(?:width|height)\s*:\s*100(?:vw|vh)\b/i,sev:'LOW',kind:'CSS Layout',title:'100vw/100vhによるはみ出しを確認してください',desc:'スクロールバーやモバイルUIの影響で余白が発生することがあります。',conf:'LOW',score:30},
+        {re:/\bposition\s*:\s*static\b[^{}]*\bz-index\s*:/i,sev:'MEDIUM',kind:'CSS Stacking',title:'static要素のz-indexを確認してください',desc:'期待通り重なり順を制御できない場合があります。',conf:'MEDIUM',score:58},
+        {re:/\b(?:margin|padding|gap)\s*:\s*-\d+(?:\.\d+)?(?:px|rem|em|%)?/i,sev:'LOW',kind:'CSS Layout',title:'負の余白値を検出しました',desc:'意図した重なりでない場合はレイアウト崩れを確認してください。',conf:'MEDIUM',score:48},
+        {re:/\bopacity\s*:\s*1\.(?!0+\b)\d+/i,sev:'LOW',kind:'CSS Value',title:'opacityが1を超える可能性があります',desc:'有効範囲0〜1を確認してください。',conf:'CERTAIN',score:100},
+        {re:/\bopacity\s*:\s*-\d/i,sev:'CRITICAL',kind:'CSS Value',title:'opacityが負値です',desc:'有効範囲外のため意図を確認してください。',conf:'CERTAIN',score:100},
+        {re:/\bz-index\s*:\s*\d{5,}/i,sev:'LOW',kind:'CSS Stacking',title:'非常に大きいz-indexを使用しています',desc:'スタッキングコンテキスト設計を整理できるか確認してください。',conf:'LOW',score:20},
+        {re:/!important\s*!important/i,sev:'LOW',kind:'CSS',title:'同一宣言で!importantが重複しています',desc:'記述ミスの可能性があります。',conf:'HIGH',score:82},
+        {re:/^\s*[^{}]+\{\s*\}/,sev:'LOW',kind:'CSS',title:'空のCSSルールがあります',desc:'不要なセレクタなら削除を検討してください。',conf:'HIGH',score:80},
+        {re:/@import\s+url\s*\(/i,sev:'LOW',kind:'CSS Performance',title:'CSS内@importによる外部読み込みがあります',desc:'読み込み順序・遅延・CSPを確認してください。',conf:'LOW',score:24},
+        {re:/\b(?:display|position|overflow|visibility)\s*:\s*none\b/i,sev:'INFO',kind:'CSS State',title:'非表示スタイルを検出しました',desc:'アクセシビリティや操作可能性の意図を確認してください。',conf:'LOW',score:12}
+      ]);
+    }
+
+    if(['java','c','cpp','cs','go','rust','php','ruby','kotlin','swift'].includes(lang)){
+      const common=[
+        {re:/\b(password|passwd|secret|token|api[_-]?key)\b\s*[=:]\s*["'][^"']{4,}["']/i,sev:'HIGH',kind:'Security',title:'機密情報らしき値をハードコードしています',desc:'認証情報は安全な秘密管理へ移してください。',conf:'HIGH',score:94},
+        {re:/\bTODO\b|\bFIXME\b/,sev:'INFO',kind:'Maintenance',title:'TODO/FIXMEコメントを検出しました',desc:'未完了実装や既知の問題が残っていないか確認してください。',conf:'LOW',score:10},
+        {re:/\bcatch\s*\([^)]*\)\s*\{\s*\}/,sev:'MEDIUM',kind:'Error Handling',title:'空のcatchがあります',desc:'例外を握り潰している可能性があります。',conf:'HIGH',score:84}
+      ];
+      runRules(common);
+      if(lang==='c'||lang==='cpp'){
+        runRules([
+          {re:/\b(?:gets|strcpy|strcat|sprintf)\s*\(/,sev:'HIGH',kind:'Memory Safety',title:'境界チェックのない文字列APIを使用しています',desc:'バッファオーバーフローの経路になり得ます。',conf:'HIGH',score:92},
+          {re:/\bscanf\s*\([^,]*,\s*["'][^"']*%s/i,sev:'HIGH',kind:'Memory Safety',title:'scanfの文字列入力に幅指定がありません',desc:'入力長を制限しないとバッファオーバーフローにつながります。',conf:'HIGH',score:88},
+          {re:/\bfree\s*\([^;]*\)\s*;\s*free\s*\(/,sev:'HIGH',kind:'Memory Safety',title:'freeの連続呼び出しを検出しました',desc:'double freeの可能性があります。',conf:'HIGH',score:92},
+          {re:/\bmemcpy\s*\([^,]+,[^,]+,\s*(?:sizeof\s*\(\s*[^)]+\s*\)|\w+)\s*\)/,sev:'LOW',kind:'Memory Safety',title:'memcpyのコピー長を確認してください',desc:'宛先バッファ容量とサイズ式の整合を確認してください。',conf:'LOW',score:28},
+          {re:/\b(?:int|long|short|char)\s+\w+\s*=\s*malloc\s*\(/,sev:'MEDIUM',kind:'Type/Memory',title:'malloc戻り値を整数型へ代入しています',desc:'ポインタ型の宣言ミスでないか確認してください。',conf:'HIGH',score:92}
+        ]);
+      }
+      if(lang==='java'){
+        runRules([
+          {re:/\bString\b[^;]*==[^;]*(?:["']|String\b)/,sev:'HIGH',kind:'Java Semantics',title:'Stringを==で比較している可能性があります',desc:'内容比較はequals等を使用します。',conf:'HIGH',score:88},
+          {re:/\bcatch\s*\(\s*Exception\b/,sev:'LOW',kind:'Error Handling',title:'Exceptionを広く捕捉しています',desc:'具体的な例外型を検討してください。',conf:'MEDIUM',score:42},
+          {re:/\bThread\.sleep\s*\(/,sev:'INFO',kind:'Concurrency',title:'Thread.sleepを使用しています',desc:'UI/サーバースレッドをブロックしていないか確認してください。',conf:'LOW',score:22},
+          {re:/\bOptional\.get\s*\(\)/,sev:'MEDIUM',kind:'Java Runtime',title:'Optional.get()によるNoSuchElementException経路があります',desc:'isPresent/orElse/orElseGet等で空状態を扱う必要がないか確認してください。',conf:'MEDIUM',score:62},
+          {re:/\bSimpleDateFormat\b/,sev:'LOW',kind:'Java Concurrency',title:'SimpleDateFormatを使用しています',desc:'インスタンス共有時はスレッドセーフでないため確認してください。',conf:'MEDIUM',score:54}
+        ]);
+      }
+      if(lang==='cs'){
+        runRules([
+          {re:/\bstring\b[^;]*(?:==|!=)[^;]*(?:string|["'])/i,sev:'LOW',kind:'C# Semantics',title:'string比較を確認してください',desc:'内容比較として==は通常使えますが、独自型やnull境界を確認してください。',conf:'LOW',score:20},
+          {re:/\b\.Result\b|\b\.Wait\(\)/,sev:'HIGH',kind:'Async',title:'Taskの同期ブロッキングを検出しました',desc:'デッドロックやスレッド枯渇を避けるためawait化を確認してください。',conf:'HIGH',score:82},
+          {re:/\basync\s+void\b/,sev:'MEDIUM',kind:'Async',title:'async voidを使用しています',desc:'イベントハンドラ以外では例外追跡が難しくなるためTask/Task<T>を検討してください。',conf:'HIGH',score:78},
+          {re:/\bcatch\s*\(\s*\)\s*\{\s*\}/,sev:'MEDIUM',kind:'Error Handling',title:'空catchがあります',desc:'例外を握り潰しています。',conf:'HIGH',score:84}
+        ]);
+      }
+      if(lang==='go'){
+        runRules([
+          {re:/\bdefer\s+[^;\n]*\bClose\(\)/,sev:'LOW',kind:'Go Resource',title:'defer Closeのエラー処理を確認してください',desc:'Closeエラーを無視していないか確認してください。',conf:'LOW',score:24},
+          {re:/\bif\s+err\s*!=\s*nil\s*\{\s*\}/,sev:'MEDIUM',kind:'Go Error Handling',title:'err != nil分岐が空です',desc:'エラーを意図的に無視していないか確認してください。',conf:'HIGH',score:84},
+          {re:/\b_\s*,\s*_\s*=\s*[A-Za-z_][\w]*\(/,sev:'MEDIUM',kind:'Go Error Handling',title:'戻り値をすべて破棄している呼び出しがあります',desc:'エラー値を含む関数なら失敗を見逃していないか確認してください。',conf:'MEDIUM',score:54},
+          {re:/\bgo\s+[A-Za-z_][\w.]*\(/,sev:'INFO',kind:'Go Concurrency',title:'goroutineを起動しています',desc:'終了同期、panic、共有状態競合、リークを確認してください。',conf:'LOW',score:16}
+        ]);
+      }
+      if(lang==='rust'){
+        runRules([
+          {re:/\.unwrap\s*\(\)/,sev:'LOW',kind:'Rust Runtime',title:'unwrap()によるpanic経路があります',desc:'失敗が通常発生しうる箇所なら?やmatch等を検討してください。',conf:'MEDIUM',score:44},
+          {re:/\.expect\s*\(\s*["']/,sev:'LOW',kind:'Rust Runtime',title:'expect()によるpanic経路があります',desc:'到達し得る失敗条件ならエラー処理を検討してください。',conf:'MEDIUM',score:40},
+          {re:/\bunsafe\s*\{/,sev:'MEDIUM',kind:'Rust Memory Safety',title:'unsafeブロックを検出しました',desc:'安全性の前提と境界を確認してください。',conf:'MEDIUM',score:56},
+          {re:/\bpanic!\s*\(/,sev:'MEDIUM',kind:'Rust Control Flow',title:'panic!を明示的に発生させています',desc:'本番入力経路で到達しないことを確認してください。',conf:'MEDIUM',score:50}
+        ]);
+      }
+      if(lang==='php'){
+        runRules([
+          {re:/\beval\s*\(/,sev:'CRITICAL',kind:'Security',title:'PHPのevalを使用しています',desc:'入力がコードとして実行される可能性があります。',conf:'CERTAIN',score:100},
+          {re:/\bassert\s*\(\s*\$/,sev:'CRITICAL',kind:'Security',title:'ユーザー値をassertへ渡している可能性があります',desc:'動的コード評価につながるため削除を検討してください。',conf:'HIGH',score:94},
+          {re:/\$_(?:GET|POST|REQUEST)\b/,sev:'INFO',kind:'Input',title:'外部入力を直接使用しています',desc:'型・長さ・許可値・SQL/HTML出力時のエスケープを確認してください。',conf:'LOW',score:18},
+          {re:/\b(?:mysql_query|mysqli_query|pg_query)\s*\(\s*["']?[^)]*\$_(?:GET|POST|REQUEST)/i,sev:'CRITICAL',kind:'SQL Injection',title:'外部入力をSQL実行へ直接混入している可能性があります',desc:'パラメータ化されたクエリを使用してください。',conf:'HIGH',score:98}
+        ]);
+      }
+      if(lang==='ruby'){
+        runRules([
+          {re:/\beval\s*\(/,sev:'HIGH',kind:'Security',title:'Rubyのevalを使用しています',desc:'文字列がコードとして実行される経路を確認してください。',conf:'HIGH',score:92},
+          {re:/\brescue\s+Exception\b/,sev:'LOW',kind:'Error Handling',title:'Exceptionを広くrescueしています',desc:'SystemExit等まで握り潰す可能性があります。',conf:'MEDIUM',score:56},
+          {re:/\bOpen3\.|`[^`]+`|%x\[/,sev:'HIGH',kind:'Command Execution',title:'外部コマンド実行構文を検出しました',desc:'引数の外部入力混入とshell解釈を確認してください。',conf:'MEDIUM',score:64},
+          {re:/\bparams\[[^\]]+\]/,sev:'INFO',kind:'Web Input',title:'Web入力(params)を使用しています',desc:'認証・認可・型・許可値を確認してください。',conf:'LOW',score:14}
+        ]);
+      }
+      if(lang==='kotlin'){
+        runRules([
+          {re:/!!\./,sev:'MEDIUM',kind:'Kotlin Null Safety',title:'非null強制演算子!!を使用しています',desc:'null時にNullPointerExceptionになるため、safe call等を検討してください。',conf:'HIGH',score:84},
+          {re:/\b(?:lateinit\s+var)\b/,sev:'LOW',kind:'Kotlin State',title:'lateinit varを使用しています',desc:'初期化前アクセスで例外になるためライフサイクルを確認してください。',conf:'MEDIUM',score:42},
+          {re:/\b!!\b/,sev:'MEDIUM',kind:'Kotlin Null Safety',title:'!!によるnull強制を検出しました',desc:'null境界を確認してください。',conf:'HIGH',score:78},
+          {re:/\bGlobalScope\.launch\b/,sev:'MEDIUM',kind:'Kotlin Coroutine',title:'GlobalScope.launchを使用しています',desc:'ライフサイクルから独立して動作し、コルーチンリークにつながる可能性があります。',conf:'MEDIUM',score:64}
+        ]);
+      }
+      if(lang==='swift'){
+        runRules([
+          {re:/\btry!\b/,sev:'LOW',kind:'Swift Runtime',title:'try!による強制失敗があります',desc:'throw時にruntime trapになる可能性があります。',conf:'HIGH',score:86},
+          {re:/\b[A-Za-z_$][\w$]*!?\.[A-Za-z_$][\w$]*\b/,sev:'INFO',kind:'Swift',title:'プロパティアクセスを検出しました',desc:'Optional境界がある値なら?やguard let等を確認してください。',conf:'LOW',score:10},
+          {re:/\b(?:as|as!)\s+[A-Za-z_][\w<>]*/,sev:'LOW',kind:'Swift Type Cast',title:'強制型変換を確認してください',desc:'as!は型が違う場合に実行時クラッシュします。',conf:'MEDIUM',score:48},
+          {re:/\bpreconditionFailure\s*\(|\bfatalError\s*\(/,sev:'MEDIUM',kind:'Swift Runtime',title:'強制クラッシュAPIを検出しました',desc:'本番入力から到達しない設計か確認してください。',conf:'MEDIUM',score:54}
+        ]);
+      }
+    }
+  }
+
   const langLabel={html:'HTML',css:'CSS',js:'JavaScript',py:'Python',json:'JSON',ts:'TypeScript',java:'Java',c:'C',cpp:'C++',cs:'C#',go:'Go',rust:'Rust',php:'PHP',ruby:'Ruby',sql:'SQL',kotlin:'Kotlin',swift:'Swift'};
   const severityMeta={
     CRITICAL:{icon:'circle-x'},HIGH:{icon:'circle-x'},MEDIUM:{icon:'triangle'},LOW:{icon:'info'},INFO:{icon:'info'}
@@ -5357,10 +5743,11 @@ function runMaxAccuracyLayer(text,lang,issues,htmlInfo){
     });
   }
 
-  function renderResults(issues,lang,parser){
+  function renderResults(issues,lang,parser,detection){
     els.results.classList.add('show');
     const counts={CRITICAL:0,HIGH:0,MEDIUM:0,LOW:0,INFO:0}; issues.forEach(x=>counts[x.severity]++);
-    let html='<span class="sum-pill info">検査モード: '+escapeHTML(langLabel[lang]||lang)+'</span><span class="sum-pill info">解析: '+escapeHTML(parser||'')+'</span><span class="sum-pill info">層: Syntax / AST / Scope / TDZ / Type / Constant Eval / Data Flow / Control Flow / DOM / CSS / Storage / Async / Concurrency / Security / Memory / Bounds / Game State</span>';
+     const detLabel=(detection&&detection.confidence)?('自動言語判定: '+escapeHTML(langLabel[lang]||lang)+' '+detection.confidence+'%'+(detection.ambiguous?'（候補が近接）':'')):'';
+     let html='<span class="sum-pill info">検査モード: '+escapeHTML(langLabel[lang]||lang)+'</span>'+(detLabel?'<span class="sum-pill ok">'+detLabel+'</span>':'')+'<span class="sum-pill info">解析: '+escapeHTML(parser||'')+'</span><span class="sum-pill info">層: Syntax / AST / Scope / TDZ / Type / Constant Eval / Data Flow / Control Flow / DOM / CSS / Storage / Async / Concurrency / Security / Memory / Bounds / Game State / Language Evidence</span>';
     for(const sev of ['CRITICAL','HIGH','MEDIUM','LOW','INFO']) if(counts[sev]) html+='<span class="sum-pill '+(sev==='INFO'?'info':sev==='MEDIUM'?'warn':'err')+'">'+sev+' '+counts[sev]+'件</span>';
     if(!issues.length) html+='<span class="sum-pill ok">'+iconSVG('check')+' 問題なし</span>';
     els.summaryStrip.innerHTML=html;
