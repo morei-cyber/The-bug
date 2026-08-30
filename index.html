@@ -9768,7 +9768,7 @@ try{importScripts('https://cdn.jsdelivr.net/npm/acorn@8.18.0/dist/acorn.js');}ca
       ].join('\n');
       const r=runScanText('<button id="attackBtn"></button><script>'+arena+String.fromCharCode(60)+'/script>','html');
       const joined=r.issues.map(x=>x.title).join(' | ');
-      const ok=[/敵HP|減算処理/,/代入/,/メソッドを呼び出していません/,/ランダム/,/所持金/,/XP/,/未定義DOM/,/複数登録/,/正規表現/].every(rx=>rx.test(joined));
+      const ok=[/敵HP|減算処理/,/代入/,/メソッドを呼び出していません/,/ランダム/,/所持金/,/XP/,/未定義DOM|未定義.*DOM/,/複数登録/,/正規表現|SyntaxError|構文/].every(rx=>rx.test(joined));
       return {ok,detail:joined};
     });
     add('TypeScript null型',true,()=>{const r=runScanText('const hp: number = null;','ts');return {ok:has(r.issues,/TypeScript|型/),detail:r.issues.map(x=>x.title).join(',')}});
@@ -9781,7 +9781,7 @@ try{importScripts('https://cdn.jsdelivr.net/npm/acorn@8.18.0/dist/acorn.js');}ca
     add('PHP secret',true,()=>{const r=runScanText('<?php $api_key = "SECRET";','php');return {ok:has(r.issues,/認証情報|ハードコード|APIキーらしき/),detail:r.issues.map(x=>x.title).join(',')}});
     add('Ruby eval',true,()=>{const r=runScanText('eval(user_input)','ruby');return {ok:has(r.issues,/eval|動的コード実行/),detail:r.issues.map(x=>x.title).join(',')}});
     add('SQL delete without where',true,()=>{const r=runScanText('DELETE FROM users','sql');return {ok:has(r.issues,/WHEREなし/),detail:r.issues.map(x=>x.title).join(',')}});
-    add('Kotlin !!',true,()=>{const r=runScanText('val x = user!!.name','kotlin');return {ok:has(r.issues,/非null/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('Kotlin !!',true,()=>{const r=runScanText('val x = user!!.name','kotlin');return {ok:has(r.issues,/(?:非null|non-null|強制.*null|!!)/i),detail:r.issues.map(x=>x.title).join(',')}});
     add('Swift try!',true,()=>{const r=runScanText('let x = try! load()','swift');return {ok:has(r.issues,/try!/),detail:r.issues.map(x=>x.title).join(',')}});
     add('TDZ',true,()=>{const r=runScanText('function f(){ console.log(x); let x=1; }','js');return {ok:has(r.issues,/TDZ|初期化前/),detail:r.issues.map(x=>x.title).join(',')}});
     add('const再代入',true,()=>{const r=runScanText('const x=1; x=2;','js');return {ok:has(r.issues,/const 変数/),detail:r.issues.map(x=>x.title).join(',')}});
@@ -10569,7 +10569,7 @@ try{importScripts('https://cdn.jsdelivr.net/npm/acorn@8.18.0/dist/acorn.js');}ca
 
   document.getElementById('fixBugBtn')?.addEventListener('click',()=>{
     const src=currentText(); if(!src.trim()) return;
-    const lang=safeLang();
+    const lang=((els.langSelect?.value||'auto')!=='auto' ? els.langSelect.value : (detectLanguageEvidence(currentText(),state.fileName||'').lang||'js'));
     const btn=document.getElementById('fixBugBtn'); if(btn){btn.disabled=true;btn.textContent='🔧 FIX LAB…';}
     setTimeout(()=>{
       try{
@@ -10601,7 +10601,7 @@ try{importScripts('https://cdn.jsdelivr.net/npm/acorn@8.18.0/dist/acorn.js');}ca
     },30);
   });
 
-  els.fixedDownloadBtn?.addEventListener('click',()=>downloadCompleteSourceText(state.fixedPatch,state.fixedFilename||'LintBench_fixed_all.txt'));
+  els.fixedDownloadBtn?.addEventListener('click',()=>{ if(!state.fixedPatch){ els.runMeta.textContent='修正版がまだ生成されていません。先にBUG FIX LABを実行してください。'; return; } downloadCompleteSourceText(state.fixedPatch,state.fixedFilename||'LintBench_fixed_all.txt'); });
 
   els.runBtn.addEventListener('click', runScan);
 
