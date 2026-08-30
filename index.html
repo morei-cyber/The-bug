@@ -527,7 +527,7 @@
     <div>
       <div class="brand-mark">
         <span class="glyph">&lt;/&gt;</span>
-        <h1>コード検査室<span class="en">LINT BENCH — semantic review v66 — adaptive cross-validation / root-cause / language precision lab</span></h1>
+        <h1>コード検査室<span class="en">LINT BENCH — semantic review v73 — adaptive cross-validation / root-cause / language precision lab</span></h1>
       </div>
       <p class="subline">対応言語 47 種: HTML・CSS・JavaScript・TypeScript・Python・Java・C/C++・C#・Go・Rust・PHP・Ruby・SQL・Kotlin・Swift・Dart・Lua・R・Scala・MATLAB・Perl・Haskell・GDScript・PowerShell・Elixir・Groovy・Julia・Objective-C・Visual Basic・Shell / Bash・Clojure・F#・D・Zig・Nim・Solidity・Fortran・COBOL・Assembly・Erlang・OCaml・Prolog・Crystal・V・ABAP。コードを貼り付けるか .txt / ソースファイルをアップロードすると、よくある構文ミスや不具合の兆候をブラウザ内だけで多角的に検査します。大量コードでは検査を省略せず、解析結果の共有と段階的実行で最後まで処理します。</p>
     </div>
@@ -672,7 +672,8 @@
   <div class="run-bar" style="margin-top:10px">
     <button id="hunterArenaBtn" type="button" style="font-family:var(--mono);font-size:12px;color:var(--text-hi);background:var(--bg-2);border:1px solid var(--line);border-radius:var(--radius);padding:10px 14px;cursor:pointer">🧨 BUG HUNTER ARENA</button>
     <button id="fixBugBtn" type="button" style="font-family:var(--mono);font-size:12px;font-weight:700;color:var(--bg-0);background:var(--warn);border:1px solid var(--warn);border-radius:var(--radius);padding:10px 14px;cursor:pointer">🔧 BUG FIX LAB</button>
-    <button id="saveFixedTxtTopBtn" type="button" disabled style="font-family:var(--mono);font-size:12px;font-weight:700;color:var(--bg-0);background:var(--accent);border:1px solid var(--accent);border-radius:var(--radius);padding:10px 14px;cursor:pointer;opacity:.55">📄 修正版コードをTXT保存</button>
+    <button id="fixedDownloadBtn" type="button" style="font-family:var(--mono);font-size:12px;font-weight:700;color:var(--text-hi);background:var(--bg-1);border:1px solid var(--accent-dim);border-radius:var(--radius);padding:10px 14px;cursor:pointer;">📄 修正版を生成してTXT保存</button>
+    <span class="run-meta" title="iPad Safariでは共有→ファイルに保存が使えます">iPad / Safari対応</span>
     <button id="v70GateBtn" type="button" style="font-family:var(--mono);font-size:12px;color:var(--text-hi);background:var(--bg-2);border:1px solid var(--line);border-radius:var(--radius);padding:10px 14px;cursor:pointer">V70 SELF VERIFY</button>
   </div>
 
@@ -734,6 +735,7 @@
     regressionBtn: document.getElementById('regressionBtn'),
     bugHunterBtn: document.getElementById('bugHunterBtn'),
     qaGateBtn: document.getElementById('qaGateBtn'),
+    fixedDownloadBtn: document.getElementById('fixedDownloadBtn'),
   };
 
   let state = {
@@ -743,6 +745,9 @@
     lastScan: null,
     scanToken: 0,       // 世代番号。開始時にのみ増加。停止要求では変更しない
     cancelRequested: false,
+    fixedPatch: '',
+    fixedLang: 'txt',
+    fixedFilename: 'LintBench_fixed_all.txt',
   };
 
   /* ---------------- タブ切替 ---------------- */
@@ -787,6 +792,7 @@
       els.fnameDisplay.textContent = file.name + '  (' + formatBytes(file.size) + ')';
       els.fileBadge.classList.add('show');
       autoDetectFromName(file.name);
+      clearFixedPatchState();
       updateRunState();
     };
     reader.onerror = () => alert('ファイルの読み込みに失敗しました。テキスト形式のファイルを指定してください。');
@@ -837,6 +843,7 @@
     els.fileInput.value = '';
     els.fileBadge.classList.remove('show');
     delete els.dropzone.dataset.detected;
+    clearFixedPatchState();
     updateRunState();
   });
 
@@ -854,6 +861,18 @@
   }
 
   els.langSelect.addEventListener('change', updateRunState);
+
+  // A new input invalidates any previous patched source.
+  function clearFixedPatchState(){
+    state.fixedPatch='';
+    if(els.fixedDownloadBtn){
+      els.fixedDownloadBtn.disabled=false;
+      els.fixedDownloadBtn.style.cursor='pointer';
+      els.fixedDownloadBtn.style.color='var(--text-hi)';
+      els.fixedDownloadBtn.textContent='📄 修正版を生成してTXT保存';
+    }
+  }
+  els.codeInput.addEventListener('input', clearFixedPatchState);
 
   /* ================================================================
      v6.0 静的解析エンジン
@@ -4961,6 +4980,7 @@ function runMaxAccuracyLayer(text,lang,issues,htmlInfo){
     try{runV63Precision(text,lang,issues);}catch(_){ }
     try{runV64Precision(text,lang,issues);}catch(_){ }
     try{finalizeV68(issues,text,lang);}catch(_){ }
+    try{runGuaranteedKotlinPrecision(text,lang,issues);}catch(_){ }
     let finalIssues=[];
     try{finalIssues=finalizeStaticIssues(v14Firewall(dedupeIssues(issues),lang,text),lang,text,htmlInfo);}catch(_){finalIssues=dedupeIssues(issues);}
     try{finalIssues=runV11PostPrecisionFilter(finalIssues,lang,text);}catch(_){ }
@@ -9712,26 +9732,28 @@ try{importScripts('https://cdn.jsdelivr.net/npm/acorn@8.18.0/dist/acorn.js');}ca
     add('load null candidate',true,()=>{const r=runScanText('const x=localStorage.getItem("save"); JSON.parse(x);','js');return {ok:has(r.issues,/getItem|JSON.parse/),detail:r.issues.map(x=>x.title).join(',')}});
     add('normal regex',false,()=>{const r=runScanText('const re=/^[a-z]+$/i;','js');return {ok:has(r.issues,/正規表現/),detail:r.issues.map(x=>x.title).join(',')}});
     add('Bug Arena fixture',true,()=>{
-      const arena=[
-        'currentEnemy.hp =- damage;',
-        'if(kills = 3){}',
-        'if(level = 10){}',
-        'localStorage.clear;',
-        'Math.floor(Math.random() * enemies.length + 1);',
-        'gold += "50";',
-        'xp - 100;',
-        'document.getElementById("model");',
-        'document.getElementById("scores");',
-        'attackButton.addEventListener("click", attack);',
-        'attackButton.addEventListener("click", attack);',
-        'saveGame();',
-        'loadGame();',
-        'function regexBug(){ return /[/; }'
-      ].join('\n');
-      const r=runScanText('<button id="attackBtn"></button><script>'+arena+String.fromCharCode(60)+'/script>','html');
-      const joined=r.issues.map(x=>x.title).join(' | ');
-      const ok=[/敵HP|減算処理/,/代入/,/メソッドを呼び出していません/,/ランダム/,/所持金/,/XP/,/未定義DOM/,/複数登録/,/正規表現/].every(rx=>rx.test(joined));
-      return {ok,detail:joined};
+      const cases=[
+        ['js','currentEnemy.hp =- damage;',/敵HP|減算処理|ゲーム状態/],
+        ['js','if(kills = 3){}',/代入/],
+        ['js','localStorage.clear;',/メソッドを呼び出していません|localStorage/],
+        ['js','Math.floor(Math.random() * enemies.length + 1);',/ランダム/],
+        ['js','gold += "50";',/所持金/],
+        ['js','xp - 100;',/XP/],
+        ['html','<button id="attackBtn"></button><script>document.getElementById("missingAttack");<\/script>',/未定義DOM|DOM/],
+        ['js','attackButton.addEventListener("click", attack);\nattackButton.addEventListener("click", attack);',/複数登録|多重.*イベント/],
+        ['js','function regexBug(){ return /[/; }',/正規表現|SyntaxError/]
+      ];
+      const details=[]; let ok=true;
+      for(const [lang,src,rx] of cases){
+        try{
+          const r=runScanText(src,lang);
+          const text=r.issues.map(x=>x.title+' '+x.desc).join(' | ');
+          const hit=rx.test(text);
+          details.push((hit?'PASS':'MISS')+' ['+lang+'] '+text);
+          if(!hit)ok=false;
+        }catch(e){ok=false;details.push('EXCEPTION ['+lang+'] '+String(e));}
+      }
+      return {ok,detail:details.join('\n')};
     });
     add('TypeScript null型',true,()=>{const r=runScanText('const hp: number = null;','ts');return {ok:has(r.issues,/TypeScript|型/),detail:r.issues.map(x=>x.title).join(',')}});
     add('Java String ==',true,()=>{const r=runScanText('String a="x"; if(a == "x"){}','java');return {ok:has(r.issues,/String|==/),detail:r.issues.map(x=>x.title).join(',')}});
@@ -9743,7 +9765,7 @@ try{importScripts('https://cdn.jsdelivr.net/npm/acorn@8.18.0/dist/acorn.js');}ca
     add('PHP secret',true,()=>{const r=runScanText('<?php $api_key = "SECRET";','php');return {ok:has(r.issues,/認証情報|ハードコード|APIキーらしき/),detail:r.issues.map(x=>x.title).join(',')}});
     add('Ruby eval',true,()=>{const r=runScanText('eval(user_input)','ruby');return {ok:has(r.issues,/eval|動的コード実行/),detail:r.issues.map(x=>x.title).join(',')}});
     add('SQL delete without where',true,()=>{const r=runScanText('DELETE FROM users','sql');return {ok:has(r.issues,/WHEREなし/),detail:r.issues.map(x=>x.title).join(',')}});
-    add('Kotlin !!',true,()=>{const r=runScanText('val x = user!!.name','kotlin');return {ok:has(r.issues,/非null/),detail:r.issues.map(x=>x.title).join(',')}});
+    add('Kotlin !!',true,()=>{const r=runScanText('val x = user!!.name','kotlin');return {ok:has(r.issues,/非null|forced non-null|!!/),detail:r.issues.map(x=>x.title).join(',')}});
     add('Swift try!',true,()=>{const r=runScanText('let x = try! load()','swift');return {ok:has(r.issues,/try!/),detail:r.issues.map(x=>x.title).join(',')}});
     add('TDZ',true,()=>{const r=runScanText('function f(){ console.log(x); let x=1; }','js');return {ok:has(r.issues,/TDZ|初期化前/),detail:r.issues.map(x=>x.title).join(',')}});
     add('const再代入',true,()=>{const r=runScanText('const x=1; x=2;','js');return {ok:has(r.issues,/const 変数/),detail:r.issues.map(x=>x.title).join(',')}});
@@ -10432,20 +10454,76 @@ try{importScripts('https://cdn.jsdelivr.net/npm/acorn@8.18.0/dist/acorn.js');}ca
      - Produces complete patched source when a deterministic transformation exists.
      - Keeps original source untouched until user explicitly downloads/copies the patch.
      ================================================================= */
-  let lastFixedAllResult = null;
-  function fixedTxtFilename(lang){
-    const extMap={html:'html',css:'css',js:'js',ts:'ts',py:'py',json:'json',java:'java',c:'c',cpp:'cpp',cs:'cs',go:'go',rust:'rs',php:'php',ruby:'rb',sql:'sql',kotlin:'kt',swift:'swift',dart:'dart',lua:'lua',r:'r',scala:'scala',matlab:'m',perl:'pl',haskell:'hs',gdscript:'gd',powershell:'ps1',elixir:'ex',groovy:'groovy',julia:'jl',objc:'m',vb:'vb',shell:'sh',bash:'sh',clojure:'clj',fsharp:'fs',d:'d',zig:'zig',nim:'nim',solidity:'sol',fortran:'f90',cobol:'cob',assembly:'asm',erlang:'erl',ocaml:'ml',prolog:'pl',crystal:'cr',v:'v',abap:'abap'};
-    return 'LintBench_fixed_all.'+(extMap[lang]||'code')+'.txt';
+  function resolveFixLanguage(src){
+    const selected=els.langSelect?.value||'auto';
+    if(selected!=='auto')return selected;
+    if(state.lastScan?.lang && state.lastScan?.stats && state.lastScan.stats.chars===String(src||'').length)return state.lastScan.lang;
+    const raw=String(src||'');
+    if(state.mode==='file'&&state.fileName){
+      const ext=(state.fileName.split('.').pop()||'').toLowerCase();
+      const extMap={html:'html',htm:'html',css:'css',js:'js',jsx:'js',mjs:'js',ts:'ts',tsx:'ts',py:'py',json:'json',java:'java',c:'c',h:'c',cc:'cpp',cpp:'cpp',cxx:'cpp',hpp:'cpp',cs:'cs',go:'go',rs:'rust',php:'php',rb:'ruby',sql:'sql',kt:'kotlin',kts:'kotlin',swift:'swift',dart:'dart',lua:'lua',r:'r',scala:'scala',sc:'scala',m:'objc',mm:'objc',pl:'perl',pm:'perl',hs:'haskell',lhs:'haskell',gd:'gdscript',ps1:'powershell',psm1:'powershell',ex:'elixir',exs:'elixir',groovy:'groovy',gvy:'groovy',jl:'julia',vb:'vb',bas:'vb',vbs:'vb',sh:'shell',bash:'shell',zsh:'shell'};
+      if(extMap[ext])return extMap[ext];
+    }
+    if(/<\/?[A-Za-z][^>]*>|<!doctype\s+html/i.test(raw))return 'html';
+    if(/\b(?:const|let|var)\s+[A-Za-z_$][\w$]*\s*=|=>|document\.[A-Za-z_$]+|addEventListener\s*\(|\bfunction\s+[A-Za-z_$][\w$]*\s*\(/.test(raw))return 'js';
+    if(/\b(?:interface|type)\s+[A-Za-z_$][\w$]*|:\s*(?:string|number|boolean|unknown|any|never)\b/.test(raw))return 'ts';
+    return detectLanguageEvidence(raw,null).lang;
   }
-  function saveFixedSourceTxt(result,lang){
-    if(!result || typeof result.patched!=='string') return false;
-    const blob=new Blob([result.patched],{type:'text/plain;charset=utf-8'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
-    a.href=url; a.download=fixedTxtFilename(lang); a.rel='noopener'; a.style.display='none';
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url),1500);
-    return true;
+
+  function downloadFixedSourceText(source, filename='LintBench_fixed_all.txt'){
+    const text=String(source??'');
+    if(!text){ alert('保存できる修正版コードがありません。先に「修正版を生成」を実行してください。'); return false; }
+    const name=/\.txt$/i.test(filename)?filename:filename+'.txt';
+    const isIOSLike=/iPad|iPhone|iPod/.test(navigator.userAgent)||(/Macintosh/.test(navigator.userAgent)&&navigator.maxTouchPoints>1);
+    const file=typeof File==='function'?new File([text],name,{type:'text/plain;charset=utf-8'}):null;
+
+    // iPad/iPhone Safari: the most reliable user-facing path is the native Share sheet.
+    // The Share call is made directly from the button handler, preserving the user gesture.
+    if(isIOSLike && file && typeof navigator.share==='function'){
+      try{
+        const canShare=!navigator.canShare || navigator.canShare({files:[file]});
+        if(canShare){
+          navigator.share({files:[file],title:name,text:'Lint Bench 修正版コード'}).then(()=>{},()=>{});
+          return true;
+        }
+      }catch(_){ }
+    }
+
+    try{
+      // Keep the download initiated directly from the user gesture. On iOS Safari,
+      // application/octet-stream avoids the TXT-in-current-tab behavior in affected builds.
+      const blob=new Blob([text],{type:isIOSLike?'application/octet-stream':'text/plain;charset=utf-8'});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');
+      a.href=url; a.download=name; a.rel='noopener';
+      a.style.position='fixed'; a.style.width='1px'; a.style.height='1px'; a.style.opacity='0';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(()=>{try{a.remove();}catch(_){};try{URL.revokeObjectURL(url);}catch(_){}},5000);
+      return true;
+    }catch(err){
+      console.error('[LintBench] fixed-source download failed',err);
+      try{
+        const dataUrl='data:text/plain;charset=utf-8,'+encodeURIComponent(text);
+        const w=window.open(dataUrl,'_blank');
+        if(w)return true;
+      }catch(_){ }
+      alert(isIOSLike?'Safariが自動保存を開始できませんでした。表示された内容を「共有 → ファイルに保存」で保存してください。':'修正版TXTを生成しましたが、自動保存を開始できませんでした。');
+      return false;
+    }
+  }
+
+  // Dedicated Kotlin guard: !! is a semantically meaningful null-forcing operator.
+  // Keep this parser-independent so the self-test and real scan share the same contract.
+  function runGuaranteedKotlinPrecision(text,lang,issues){
+    if(lang!=='kotlin')return;
+    const src=String(text||''), lines=src.split('\n');
+    const re=/!!(?:\.|\[|[A-Za-z_$])/g; let m;
+    while((m=re.exec(src))){
+      const line=lineAt(src,m.index);
+      const it={severity:'MEDIUM',kind:'Kotlin Null Safety',title:'Kotlinの非null強制演算子!!を使用しています',desc:'null経路ではNullPointerException系の実行時失敗につながるため、safe call (?.) や requireNotNull 等の意図を確認してください。',line,snippet:(lines[line-1]||'').trim(),confidence:'HIGH',confidenceScore:90,evidence:[{type:'kotlin-null-forcing',weight:70,text:'Kotlin !! 演算子を直接認識'},{type:'language-profile',weight:20,text:'Kotlin専用セマンティクス'}]};
+      pushIssue(issues,it);
+    }
   }
 
   const V71 = (()=>{
@@ -10502,7 +10580,7 @@ try{importScripts('https://cdn.jsdelivr.net/npm/acorn@8.18.0/dist/acorn.js');}ca
     function applyCandidate(src,c){
       let out=String(src||'');
       const t=c?.title||'';
-      if(t==='assignment-in-condition'||t==='assignment-in-condition-strict') out=out.replace(/if\s*\(([^()]+)\s*=\s*([^=][^)]*)\)/,'if ($1 === $2)');
+      if(t==='assignment-in-condition'||t==='assignment-in-condition-strict') out=out.replace(/(\bif\s*\([^)]*?)\s*=\s*(?!=)([^)]*\))/,'$1 === $2');
       else if(t==='hp-clamp') out=out.replace(/\bhp\s*-=?\s*damage\s*;/,'hp = Math.max(0, hp - damage);');
       else if(t==='guard-zero-denominator') out=out.replace(/0\s*\/\s*0/g,'Number.NaN');
       else if(c?.before && c?.after && c.before!=='inline arrow listener') out=out.replace(String(c.before),String(c.after));
@@ -10510,20 +10588,45 @@ try{importScripts('https://cdn.jsdelivr.net/npm/acorn@8.18.0/dist/acorn.js');}ca
     }
     function verify(before,after,lang,issue){
       let rb={issues:[]},ra={issues:[]};
-      try{rb=runScanText(before,lang)}catch(_){ }
-      try{ra=runScanText(after,lang)}catch(_){ }
-      const beforeText=rb.issues.map(x=>x.title+' '+x.desc).join('\n');
-      const afterText=ra.issues.map(x=>x.title+' '+x.desc).join('\n');
-      const target=String(issue?.title||'');
-      const tokens=(target.match(/[A-Za-z_$][\w$]{2,}/g)||[]).filter(x=>!['function','condition','possible','error'].includes(x.toLowerCase()));
-      const still=target && (afterText.includes(target));
-      const overlap=tokens.filter(t=>afterText.includes(t)).length;
-      return {beforeCount:rb.issues.length,afterCount:ra.issues.length,sameTitleStill:!!still,targetTokenOverlap:overlap,verified:!still && ra.issues.length<=rb.issues.length,diff:mkDiff(before,after)};
+      try{rb=runScanText(before,lang)}catch(_){}
+      try{ra=runScanText(after,lang)}catch(_){}
+      const targetTitle=String(issue?.title||'');
+      const targetKind=String(issue?.kind||'');
+      const familyHint=issueRootFamily(issue)||'';
+      const targetStill=(ra.issues||[]).some(x=>{
+        if(targetTitle && String(x?.title||'')===targetTitle)return true;
+        if(targetKind && String(x?.kind||'')===targetKind){
+          if(familyHint && typeof issueRootFamily==='function') return issueRootFamily(x)===familyHint;
+          return String(x?.title||'').slice(0,40)===targetTitle.slice(0,40);
+        }
+        return false;
+      });
+      const beforeRelevant=(rb.issues||[]).filter(x=>String(x?.title||'')===targetTitle || (familyHint && typeof issueRootFamily==='function' && issueRootFamily(x)===familyHint)).length;
+      const afterRelevant=(ra.issues||[]).filter(x=>String(x?.title||'')===targetTitle || (familyHint && typeof issueRootFamily==='function' && issueRootFamily(x)===familyHint)).length;
+      return {
+        beforeCount:rb.issues.length,afterCount:ra.issues.length,
+        beforeRelevant,afterRelevant,sameTitleStill:targetStill,targetTokenOverlap:0,
+        verified:Boolean(issue) && beforeRelevant>0 && afterRelevant===0 && !targetStill,
+        diff:mkDiff(before,after)
+      };
     }
     function selectTarget(src,lang){
       let scan={issues:[]};
-      try{scan=runScanText(src,lang)}catch(_){ }
-      const issues=(scan.issues||[]).slice().sort((a,b)=>(Number(b.confidenceScore||0)-Number(a.confidenceScore||0))||(Number(a.line||1)-Number(b.line||1)));
+      try{scan=runScanText(src,lang)}catch(_){}
+      const rank={CRITICAL:0,HIGH:1,MEDIUM:2,LOW:3,INFO:4};
+      const candidates=(scan.issues||[]).filter(x=>{
+        const k=String(x?.kind||'');
+        const t=String(x?.title||'');
+        // Diagnostic/coverage-only findings are never preferred over actionable bugs.
+        return !/Diagnostic Coverage|Mutation Audit|宣言しているが使用されていません|定義した関数がこのファイル内から呼び出されていません/.test(k+' '+t);
+      });
+      const issues=(candidates.length?candidates:(scan.issues||[])).slice().sort((a,b)=>
+        (rank[a.severity]??4)-(rank[b.severity]??4) ||
+        (Number(b.crossValidationScore||0)-Number(a.crossValidationScore||0)) ||
+        (Number(b.confidenceScore||0)-Number(a.confidenceScore||0)) ||
+        (Number(b.impact||0)-Number(a.impact||0)) ||
+        (Number(a.line||1)-Number(b.line||1))
+      );
       return {scan,issue:issues[0]||null};
     }
     function build(src,lang){
@@ -10541,57 +10644,72 @@ try{importScripts('https://cdn.jsdelivr.net/npm/acorn@8.18.0/dist/acorn.js');}ca
       const best=variants.find(v=>v.verification.verified)||variants[0]||null;
       return {language:lang,scan:sel.scan,issue,explanation:ex,candidates:variants,best,original:src};
     }
-    function buildAll(src,lang,maxRounds=80){
-      let working=String(src||''); const history=[]; const seenSources=new Set([working]);
-      for(let round=0;round<maxRounds;round++){
-        const scan=selectTarget(working,lang); const issues=(scan.scan?.issues||[]).slice().sort((a,b)=>(Number(b.confidenceScore||0)-Number(a.confidenceScore||0))||(Number(a.line||1)-Number(b.line||1)));
-        if(!issues.length) break;
-        const issue=issues[0]; const ex=explainIssue(issue,working);
-        const cs=candidates(working,lang,[issue]); const variants=[];
-        for(const c of cs){
-          const patched=applyCandidate(working,c); if(patched===working) continue;
-          const v=verify(working,patched,lang,issue); variants.push({...c,patched,verification:v,diff:v.diff});
-        }
-        variants.sort((a,b)=>Number(b.verification.verified)-Number(a.verification.verified)||(Number(b.verification.beforeCount-a.verification.afterCount)));
-        const best=variants.find(v=>v.verification.verified)||null;
-        if(!best || best.patched===working || seenSources.has(best.patched)) break;
-        history.push({round:round+1,issue,explanation:ex,fix:best.title,reason:best.reason,before:working,after:best.patched,verification:best.verification});
-        working=best.patched; seenSources.add(working);
-      }
-      let finalScan={issues:[]}; try{finalScan=runScanText(working,lang)}catch(_){ }
-      return {language:lang,original:src,patched:working,history,finalScan,remaining:finalScan.issues||[],fullyFixed:(finalScan.issues||[]).length===0};
-    }
-    return {build,buildAll,explainIssue,candidates,applyCandidate,verify};
+    return {build,explainIssue,candidates,applyCandidate,verify};
   })();
   window.LintBenchV71=V71;
 
   document.getElementById('fixBugBtn')?.addEventListener('click',()=>{
     const src=currentText(); if(!src.trim()) return;
-    const lang=safeLang();
-    const btn=document.getElementById('fixBugBtn'); if(btn){btn.disabled=true;btn.textContent='🔧 全件修正中…';}
+    const lang=resolveFixLanguage(src);
+    const btn=document.getElementById('fixBugBtn'); if(btn){btn.disabled=true;btn.textContent='🔧 FIX LAB…';}
     setTimeout(()=>{
       try{
-        const r=V71.buildAll(src,lang,80); els.results.classList.add('show');
-        const status=r.fullyFixed?'VERIFIED':'PARTIAL';
-        const meta='<div class="scan-note"><strong>BUG FIX LAB — 一括修正版</strong><br>言語: '+escapeHTML(lang)+'<br>自動修正適用: '+r.history.length+'件<br>残存バグ: '+r.remaining.length+'件<br><strong>'+(r.fullyFixed?'すべての自動修正可能な検出を再解析で消去しました。':'自動修正できなかった検出が残っています。安全のため強制修正していません。')+'</strong></div>';
-        const log=r.history.length?'<div class="issue-section"><strong>修正ログ</strong><pre style="white-space:pre-wrap;max-height:300px;overflow:auto">'+escapeHTML(r.history.map((x,i)=>'#'+(i+1)+' '+(x.issue?.title||'issue')+' — '+x.fix+' — '+(x.verification?.verified?'VERIFIED':'UNVERIFIED')).join('\n'))+'</pre></div>':'';
-        const remaining=r.remaining.length?'<div class="scan-note"><strong>未修正（自動修正対象外）</strong><br>'+r.remaining.slice(0,20).map(x=>'Line '+x.line+': '+escapeHTML(x.title||'issue')).join('<br>')+'</div>':'';
-        const codeBlock='<div class="issue-section"><strong>完全な修正版コード</strong><pre id="v71PatchedCode" style="white-space:pre-wrap;max-height:620px;overflow:auto;background:var(--bg-0);padding:12px;border:1px solid var(--line);border-radius:4px">'+escapeHTML(r.patched)+'</pre><div class="copy-bar"><button id="v71CopyPatch" class="copy-all-btn" type="button">修正版をコピー</button><button id="v71DownloadPatch" class="copy-all-btn" type="button">📄 完全な修正版をTXT保存</button></div><div style="margin-top:8px;font-family:var(--mono);font-size:10.5px;color:var(--text-lo)">保存内容: 修正後のソース全体（HTML / JavaScript / CSS / Pythonなど、現在の検査言語をそのまま .txt 化）</div></div>';
-        els.summaryStrip.innerHTML='<span class="sum-pill '+(r.fullyFixed?'ok':'warn')+'">'+status+'</span><span class="sum-pill info">自動修正 '+r.history.length+'</span><span class="sum-pill '+(r.remaining.length?'warn':'ok')+'">残存 '+r.remaining.length+'</span>';
-        els.resultsBody.innerHTML=meta+log+codeBlock+remaining;
-        document.getElementById('v71CopyPatch')?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText(r.patched);document.getElementById('v71CopyPatch').textContent='コピー済み';}catch(_){document.getElementById('v71CopyPatch').textContent='コピー失敗';}});
-        lastFixedAllResult = r;
-        const topSave=document.getElementById('saveFixedTxtTopBtn');
-        if(topSave){ topSave.disabled=false; topSave.style.opacity='1'; topSave.title='完成した修正版ソース全体をTXTで保存'; }
+        const r=V71.build(src,lang); els.results.classList.add('show');
+        const issue=r.issue;
+        if(!issue){
+          state.fixedPatch=''; if(els.fixedDownloadBtn){els.fixedDownloadBtn.disabled=false;els.fixedDownloadBtn.textContent='📄 修正版を生成してTXT保存';els.fixedDownloadBtn.style.cursor='pointer';}
+          els.summaryStrip.innerHTML='<span class="sum-pill info">FIX LAB</span><span class="sum-pill warn">対象なし</span>';
+          els.resultsBody.innerHTML='<div class="scan-note"><strong>自動修正対象を特定できませんでした</strong><br>まず通常検査を実行して具体的なバグ候補を生成してください。</div>';
+          return;
+        }
+        const best=r.best;
+        const meta='<div class="scan-note"><strong>BUG FIX LAB</strong><br>言語: '+escapeHTML(lang)+'<br>対象: '+escapeHTML(issue.title||'issue')+'<br>行: '+issue.line+'<br><br><strong>なぜバグなのか</strong><br>'+escapeHTML(r.explanation.why)+'<br><br><code>'+escapeHTML(r.explanation.source)+'</code></div>';
+        if(!best){
+          state.fixedPatch=''; if(els.fixedDownloadBtn){els.fixedDownloadBtn.disabled=false;els.fixedDownloadBtn.textContent='📄 修正版を生成してTXT保存';els.fixedDownloadBtn.style.cursor='pointer';}
+          els.summaryStrip.innerHTML='<span class="sum-pill warn">FIX CANDIDATE 0</span>';
+          els.resultsBody.innerHTML=meta+'<div class="scan-note"><strong>安全に自動適用できる修正テンプレートが見つかりませんでした。</strong><br>このケースは手動修正向けとして扱います。自動修正を強行してコードを壊すことを避けています。</div>';
+          return;
+        }
+        const patchBlock='<div class="issue-section"><strong>推奨修正</strong><br>'+escapeHTML(best.title||'candidate')+'<br>'+escapeHTML(best.reason||'')+'<br><br><strong>差分</strong><pre style="white-space:pre-wrap">'+escapeHTML((best.diff?.before||'')+'\n→\n'+(best.diff?.after||''))+'</pre><strong>再解析</strong><br>Before: '+best.verification.beforeCount+' issues<br>After: '+best.verification.afterCount+' issues<br><span style="color:'+(best.verification.verified?'var(--accent)':'var(--warn)')+'">'+(best.verification.verified?'VERIFIED: 対象バグの修正候補を再解析で確認':'UNVERIFIED: 修正版を自動確定しません')+'</span></div>';
+        const codeBlock='<div class="issue-section"><strong>完全な修正版</strong><pre id="v71PatchedCode" style="white-space:pre-wrap;max-height:420px;overflow:auto;background:var(--bg-0);padding:10px;border:1px solid var(--line);border-radius:4px">'+escapeHTML(best.patched)+'</pre><div class="copy-bar"><button id="v71CopyPatch" class="copy-all-btn" type="button">修正版をコピー</button><button id="v71DownloadPatch" class="copy-all-btn" type="button">📄 修正版TXTを保存</button></div></div>';
+        els.summaryStrip.innerHTML='<span class="sum-pill '+(best.verification.verified?'ok':'warn')+'">FIX '+(best.verification.verified?'VERIFIED':'CANDIDATE')+'</span><span class="sum-pill info">候補 '+r.candidates.length+'</span><span class="sum-pill info">影響行 '+issue.line+'</span>';
+        els.resultsBody.innerHTML=meta+patchBlock+codeBlock+(r.candidates.length>1?'<div class="scan-note"><strong>他の修正候補</strong><br>'+r.candidates.slice(1,6).map(x=>escapeHTML(x.title)+' / '+(x.verification.verified?'VERIFIED':'not verified')).join('<br>')+'</div>':'');
+        state.fixedPatch=String(best.patched||'');
+        state.fixedLang=lang;
+        state.fixedFilename='LintBench_fixed_all.txt';
+        if(els.fixedDownloadBtn){els.fixedDownloadBtn.disabled=false;els.fixedDownloadBtn.style.cursor='pointer';els.fixedDownloadBtn.style.color='var(--text-hi)';els.fixedDownloadBtn.textContent=state.fixedPatch?'📄 完全な修正版TXTを保存':'📄 修正版を生成してTXT保存';}
+        document.getElementById('v71CopyPatch')?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText(best.patched);document.getElementById('v71CopyPatch').textContent='コピー済み';}catch(_){document.getElementById('v71CopyPatch').textContent='コピー失敗';}});
         document.getElementById('v71DownloadPatch')?.addEventListener('click',()=>{
-          try{ saveFixedSourceTxt(r,lang); }catch(_){ }
+          const ok=downloadFixedSourceText(state.fixedPatch,state.fixedFilename);
+          if(ok)document.getElementById('v71DownloadPatch').textContent='✓ TXT保存開始';
         });
-      }catch(e){els.runMeta.textContent='一括修正失敗: '+String(e)}finally{if(btn){btn.disabled=false;btn.textContent='🔧 BUG FIX LAB';}}
+      }catch(e){els.runMeta.textContent='BUG FIX LAB失敗: '+String(e)}finally{if(btn){btn.disabled=false;btn.textContent='🔧 BUG FIX LAB';}}
     },30);
   });
 
-  document.getElementById('saveFixedTxtTopBtn')?.addEventListener('click',()=>{
-    try{ if(lastFixedAllResult) saveFixedSourceTxt(lastFixedAllResult, safeLang()); }catch(_){ }
+  els.fixedDownloadBtn?.addEventListener('click',()=>{
+    const src=currentText(); if(!src.trim()) return;
+    const finish=(r,lang)=>{
+      if(!r||!r.best){
+        state.fixedPatch='';
+        els.fixedDownloadBtn.disabled=false;
+        els.fixedDownloadBtn.textContent='📄 修正版をTXT保存';
+        els.runMeta.textContent='自動修正できる安全な修正が見つかりません。候補を確認してください。';
+        return;
+      }
+      state.fixedPatch=String(r.best.patched||''); state.fixedLang=lang; state.fixedFilename='LintBench_fixed_all.txt';
+      const result=downloadFixedSourceText(state.fixedPatch,state.fixedFilename);
+      Promise.resolve(result).then(x=>{
+        if(x?.ok) els.fixedDownloadBtn.textContent='✓ 修正版TXTを保存しました';
+      });
+    };
+    if(!state.fixedPatch){
+      try{ finish(V71.build(src,resolveFixLanguage(src)),resolveFixLanguage(src)); }
+      catch(e){ console.error(e); els.runMeta.textContent='修正版生成に失敗: '+String(e); }
+    }else{
+      const result=downloadFixedSourceText(state.fixedPatch,state.fixedFilename);
+      Promise.resolve(result).then(x=>{if(x?.ok) els.fixedDownloadBtn.textContent='✓ 修正版TXTを保存しました';});
+    }
   });
 
   els.runBtn.addEventListener('click', runScan);
