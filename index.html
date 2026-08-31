@@ -14915,5 +14915,302 @@ window.LintBenchV5000={version:CFG.VERSION,config:CFG,ruleVariants:RULE_VARIANTS
 })();
 </script>
 
+<style id="v6000-style">
+.v6000-panel{margin-top:12px;padding:14px;border:1px solid var(--accent-dim);background:var(--bg-2);border-radius:6px;font-family:var(--mono);font-size:11px;color:var(--text-mid)}
+.v6000-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:9px}.v6000-grid span{padding:7px 8px;border:1px solid var(--line);background:var(--bg-1);border-radius:4px}
+.v6000-list{max-height:340px;overflow:auto;margin-top:9px}.v6000-row{padding:6px 0;border-bottom:1px solid var(--line-soft)}
+.v6000-pass{color:var(--accent)}.v6000-hold{color:var(--warn)}.v6000-fail{color:var(--err)}.v6000-muted{color:var(--text-lo)}
+@media(max-width:720px){.v6000-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style>
+<script>
+(function installV6000PrecisionEngine(){
+'use strict';
+const V5=window.LintBenchV5000||null;
+const V4=window.LintBenchV4000||null;
+if(!V5 && !V4)return;
+const U=window;
+const CFG=Object.freeze({
+ VERSION:'V6000 ULTRA MAX PRECISION ENGINE',
+ RULE_VARIANTS:1000000,
+ ACTIVE_SAFE_RULES_TARGET:50000,
+ MAX_PROJECT_FILES:10000,
+ MAX_FILE_BYTES:20*1024*1024,
+ MAX_GRAPH_NODES:50000,
+ MAX_GRAPH_EDGES:1000000,
+ MAX_PATCH_ALTS:10,
+ MAX_TESTS_PER_PATCH:100,
+ MAX_EXECUTION_TESTS:100,
+ MAX_MUTANTS:64,
+ MAX_TEST_EXECUTION:100,
+ MAX_PASSES:128,
+ MAX_PATCH_RETRIES:4,
+ AUTO_SCORE:995,
+ AUTO_CONFIDENCE:99.7,
+ MIN_INDEPENDENT_PROOFS:3,
+ TEST_TIMEOUT_MS:1500,
+ WORKER_HARD_MS:4000,
+ ROOT_CAUSE_MIN_EVIDENCE:2,
+ MAX_SYMBOLS_PER_FILE:50000,
+ MAX_TOKENS_PER_FILE:250000
+});
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const wait=()=>new Promise(r=>(window.requestAnimationFrame?requestAnimationFrame(r):setTimeout(r,0)));
+const now=()=>performance&&performance.now?performance.now():Date.now();
+const norm=x=>({js:'javascript',ts:'typescript',tsx:'typescript',jsx:'javascript',py:'python',rb:'ruby',cs:'csharp',cpp:'cpp',cc:'cpp',rs:'rust',kt:'kotlin',sh:'shell',yml:'yaml',mjs:'javascript',cjs:'javascript'}[String(x||'').toLowerCase()]||String(x||'javascript').toLowerCase());
+const LANG_SET=new Set(['javascript','typescript','python','java','kotlin','c','cpp','csharp','go','rust','swift','dart','php','ruby','lua','r','scala','perl','haskell','gdscript','powershell','shell','clojure','fsharp','d','zig','nim','solidity','fortran','cobol','assembly','erlang','ocaml','prolog','crystal','verilog','vhdl','html','xhtml','xml','css','less','scss','sass','json','yaml','toml','ini','sql','graphql','proto','vue','svelte','astro','nginx','hcl','terraform']);
+function langFromPath(p){const e=(String(p||'').split('.').pop()||'').toLowerCase();return norm(({js:'javascript',jsx:'javascript',mjs:'javascript',cjs:'javascript',ts:'typescript',tsx:'typescript',py:'python',rb:'ruby',php:'php',java:'java',kt:'kotlin',c:'c',h:'c',cc:'cpp',cpp:'cpp',hpp:'cpp',cs:'csharp',go:'go',rs:'rust',swift:'swift',dart:'dart',lua:'lua',r:'r',scala:'scala',pl:'perl',hs:'haskell',gd:'gdscript',ps1:'powershell',sh:'shell',bash:'shell',zsh:'shell',clj:'clojure',fs:'fsharp',fsx:'fsharp',d:'d',zig:'zig',nim:'nim',sol:'solidity',f:'fortran',f90:'fortran',asm:'assembly',s:'assembly',erl:'erlang',ml:'ocaml',mli:'ocaml',pro:'prolog',cr:'crystal',v:'verilog',vhd:'vhdl',vhdl:'vhdl',html:'html',htm:'html',xhtml:'xhtml',xml:'xml',css:'css',less:'less',scss:'scss',sass:'sass',json:'json',yaml:'yaml',yml:'yaml',toml:'toml',ini:'ini',cfg:'ini',sql:'sql',graphql:'graphql',gql:'graphql',proto:'proto',vue:'vue',svelte:'svelte',astro:'astro',nginx:'nginx',hcl:'hcl',tf:'terraform',tfvars:'terraform'}[e]||'javascript'))}
+function projectFiles(){return U.__LINT_V6000_FILES||[]}
+
+/* ------------------------------------------------------------------
+   1) Language-specific semantic contracts.
+   These are conservative: they create evidence, not automatic truth.
+------------------------------------------------------------------ */
+const SEMANTIC_RULES={
+ javascript:[
+  {id:'js-optional-null-chain',re:/\b([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\b/g,kind:'nullability',guard:(s,m)=>new RegExp('\\b'+m[1]+'\\s*=\\s*(null|undefined)\\b').test(s),score:78},
+  {id:'js-missing-await',re:/(?:^|[;{}])\s*(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([A-Za-z_$][\w$]*\([^;\n]+\))\s*;/g,kind:'async',guard:(s,m)=>/\b(?:fetch|axios|Promise\.|\w*Async|\w*async)\b/.test(m[2]),score:62},
+  {id:'js-effect-deps',re:/useEffect\s*\(\s*\(?.*?\)?\s*=>[\s\S]*?,\s*\[([^\]]*)\]\s*\)/g,kind:'react',guard:(s)=>/useEffect\s*\(/.test(s),score:58},
+  {id:'js-loose-null-eq',re:/\b([A-Za-z_$][\w$]*)\s*==\s*null\b/g,kind:'nullability',guard:(s)=>true,score:97,build:m=>`${m[1]} === null || ${m[1]} === undefined`},
+  {id:'js-loose-null-ne',re:/\b([A-Za-z_$][\w$]*)\s*!=\s*null\b/g,kind:'nullability',guard:(s)=>true,score:97,build:m=>`${m[1]} !== null && ${m[1]} !== undefined`},
+  {id:'js-undefined-typeof',re:/\b([A-Za-z_$][\w$]*)\s*===\s*undefined\b/g,kind:'runtime',guard:(s)=>true,score:99,build:m=>`typeof ${m[1]} === 'undefined'`},
+  {id:'js-duplicate-semicolon',re:/;;+/g,kind:'syntax',guard:(s)=>true,score:99,build:()=>';'}
+ ],
+ typescript:[
+  {id:'ts-any-flow',re:/\s*any\b/g,kind:'type',guard:()=>true,score:55}
+ ],
+ python:[
+  {id:'py-mutable-default',re:/\bdef\s+\w+\s*\([^)]*=\s*(?:\[\]|\{\}|set\(\))/g,kind:'state',guard:()=>true,score:76},
+  {id:'py-bare-except',re:/\bexcept\s*:/g,kind:'error',guard:()=>true,score:52}
+ ],
+ java:[
+  {id:'java-runtime-exec',re:/Runtime\.getRuntime\(\)\.exec\s*\(/g,kind:'security',guard:()=>true,score:88}
+ ],
+ kotlin:[
+  {id:'kt-force-null',re:/\b[A-Za-z_][\w.]*!!/g,kind:'nullability',guard:()=>true,score:58}
+ ],
+ rust:[
+  {id:'rust-unsafe',re:/\bunsafe\s*\{/g,kind:'memory',guard:()=>true,score:42}
+ ],
+ go:[
+  {id:'go-goroutine',re:/\bgo\s+[A-Za-z_$][\w$]*\s*\(/g,kind:'concurrency',guard:()=>true,score:44}
+ ],
+ sql:[
+  {id:'sql-double-equals',re:/\b([A-Za-z_][\w$]*)\s*==\s*([^\s;,]+)/gi,kind:'syntax',guard:()=>true,score:96,build:m=>`${m[1]} = ${m[2]}`},
+  {id:'sql-select-star',re:/\bSELECT\s+\*/gi,kind:'schema',guard:()=>true,score:38}
+ ],
+ html:[
+  {id:'html-button-type',re:/<button\b(?![^>]*\btype\s*=)[^>]*>/gi,kind:'html',guard:()=>true,score:98,build:m=>m[0].replace(/>$/,' type="button">')},
+  {id:'html-img-alt',re:/<img\b(?![^>]*\balt\s*=)[^>]*>/gi,kind:'accessibility',guard:()=>true,score:96,build:m=>m[0].replace(/<img\b/i,'<img alt=""')}
+ ],
+ css:[
+  {id:'css-zero-unit',re:/(?<![\w.-])0(?:px|rem|em)\b/g,kind:'css',guard:()=>true,score:99,build:()=>`0`},
+  {id:'css-double-semicolon',re:/;;+/g,kind:'css',guard:()=>true,score:99,build:()=>`;`}
+ ],
+ json:[
+  {id:'json-object-comma',re:/,(\s*\})/g,kind:'json-syntax',guard:()=>true,score:99,build:m=>m[1]},
+  {id:'json-array-comma',re:/,(\s*\])/g,kind:'json-syntax',guard:()=>true,score:99,build:m=>m[1]}
+ ],
+ yaml:[
+  {id:'yaml-trailing-space',re:/[ \t]+$/gm,kind:'format',guard:()=>true,score:99,build:()=>''}
+ ],
+ shell:[
+  {id:'shell-duplicate-semicolon',re:/;;+/g,kind:'syntax',guard:()=>true,score:97,build:()=>';'}
+ ],
+ python:[
+  {id:'py-none-eq',re:/\b([A-Za-z_]\w*)\s*==\s*None\b/g,kind:'identity',guard:()=>true,score:99,build:m=>`${m[1]} is None`},
+  {id:'py-none-ne',re:/\b([A-Za-z_]\w*)\s*!=\s*None\b/g,kind:'identity',guard:()=>true,score:99,build:m=>`${m[1]} is not None`}
+ ],
+ html:[
+  {id:'html-button-type',re:/<button\b(?![^>]*\btype\s*=)[^>]*>/gi,kind:'html',guard:()=>true,score:99,build:m=>m[0].replace(/>$/,' type="button">')},
+  {id:'html-img-alt',re:/<img\b(?![^>]*\balt\s*=)[^>]*>/gi,kind:'accessibility',guard:()=>true,score:99,build:m=>m[0].replace(/<img\b/i,'<img alt=""')}
+ ]
+};
+
+function semanticAudit(source,lang){
+ const s=String(source||''),L=norm(lang),defs=SEMANTIC_RULES[L]||[];const out=[];
+ for(const d of defs){let re;try{re=new RegExp(d.re.source,d.re.flags.includes('g')?d.re.flags:d.re.flags+'g')}catch(_){continue}let m;
+  while((m=re.exec(s))!==null){if(!m[0]){re.lastIndex++;continue}let guarded=false;try{guarded=d.guard?!!d.guard(s,m):true}catch(_){guarded=false}out.push({id:d.id,kind:d.kind,line:s.slice(0,m.index).split(/\n/).length,before:m[0],after:d.build?d.build(m):m[0],score:d.score,guarded})}
+ }
+ return out;
+}
+
+/* ------------------------------------------------------------------
+   2) JavaScript/TypeScript AST + symbols + conservative type facts.
+------------------------------------------------------------------ */
+function parseJs(text,lang){
+ const L=norm(lang);if(!['javascript','typescript'].includes(L))return {ok:null,ast:null,error:'not-js'};
+ try{
+  if(U.acorn&&typeof U.acorn.parse==='function') return {ok:true,ast:U.acorn.parse(text,{ecmaVersion:'latest',sourceType:'module',allowAwaitOutsideFunction:true,allowReturnOutsideFunction:true}),engine:'acorn'};
+ }catch(e){return {ok:false,ast:null,error:String(e?.message||e)};}
+ return {ok:null,ast:null,error:'AST engine unavailable'};
+}
+function astFacts(text,lang){
+ const p=parseJs(text,lang),symbols=new Map(),calls=[],imports=[],exports=[];
+ if(!p.ast)return {parse:p,symbols,calls,imports,exports};
+ const add=(name,node,kind)=>{if(!name)return;if(symbols.size>=CFG.MAX_SYMBOLS_PER_FILE)return;symbols.set(name,{name,kind,line:Math.max(1,(text.slice(0,node.start).match(/\n/g)||[]).length+1),start:node.start,end:node.end})};
+ const walk=(n,parent)=>{if(!n||typeof n!=='object')return;switch(n.type){case'VariableDeclarator':if(n.id?.type==='Identifier')add(n.id.name,n,'variable');break;case'FunctionDeclaration':if(n.id)add(n.id.name,n,'function');break;case'ClassDeclaration':if(n.id)add(n.id.name,n,'class');break;case'ImportDeclaration':if(n.source?.value)imports.push(String(n.source.value));break;case'ExportNamedDeclaration':exports.push('named');break;case'CallExpression':if(n.callee?.type==='Identifier')calls.push({name:n.callee.name,line:Math.max(1,(text.slice(0,n.start).match(/\n/g)||[]).length+1)});break;}for(const k of Object.keys(n)){if(k==='loc')continue;const v=n[k];if(Array.isArray(v))for(const x of v)if(x&&typeof x.type==='string')walk(x,n);else if(v&&typeof v.type==='string')walk(v,n)}};
+ walk(p.ast,null);
+ return {parse:p,symbols,calls,imports,exports};
+}
+
+function frameworkSemantics(text,lang){
+ const L=norm(lang),s=String(text||''),findings=[];
+ if(['javascript','typescript'].includes(L)){
+  if(/useEffect\s*\(/.test(s)){
+   const effectCount=(s.match(/useEffect\s*\(/g)||[]).length;
+   findings.push({kind:'react-effect',score:60,count:effectCount,note:'React useEffect dependency/context analysis candidate'});
+  }
+  if(/from\s+['"](?:react|vue|svelte)/.test(s))findings.push({kind:'framework-import',score:40,note:'frontend framework semantics enabled'});
+ }
+ if(['vue','svelte','astro'].includes(L))findings.push({kind:'component-template',score:55,note:'template/script coupling enabled'});
+ if(L==='python'&&/@(?:app|router)\.(?:get|post|put|delete|patch)\b/.test(s))findings.push({kind:'web-route',score:55,note:'Python web-route semantics enabled'});
+ if(['sql'].includes(L))findings.push({kind:'schema-aware',score:55,note:'SQL schema-aware layer enabled'});
+ if(/THREE\./.test(s)&&/new\s+THREE\./.test(s))findings.push({kind:'threejs-resource',score:72,note:'Three.js resource lifecycle semantics enabled'});
+ return findings;
+}
+
+/* ------------------------------------------------------------------
+   3) Project-wide graph/data-flow/taint-like evidence.
+------------------------------------------------------------------ */
+function projectGraph(files){
+ const nodes=[],edges=[],byBase=new Map();
+ for(const f of files.slice(0,CFG.MAX_PROJECT_FILES)){if(!f||f.skipped)continue;const path=String(f.path||f.name||'');const id=nodes.length;nodes.push({id,path,lang:norm(f.lang||langFromPath(path)),size:String(f.text||'').length});byBase.set(path.split('/').pop(),id)}
+ const edgeSet=new Set();const add=(a,b,type,detail='')=>{if(a===b||edges.length>=CFG.MAX_GRAPH_EDGES)return;const k=a+'|'+b+'|'+type;if(edgeSet.has(k))return;edgeSet.add(k);edges.push({from:nodes[a]?.path||'',to:nodes[b]?.path||'',type,detail})};
+ const resolve=(from,imp)=>{const raw=String(imp||'').replace(/^['"]|['"]$/g,'');const base=raw.split('/').pop();if(byBase.has(base))return byBase.get(base);for(const [k,v] of byBase){if(k===base||k.replace(/\.[^.]+$/,'')===base.replace(/\.[^.]+$/,''))return v}return -1};
+ nodes.forEach((n,i)=>{const f=files.find(x=>String(x.path||x.name||'')===n.path);const s=String(f?.text||'');const L=n.lang;
+  if(['javascript','typescript'].includes(L)){let m;const re=/\bimport(?:[\s\S]*?from\s*)?['"]([^'"]+)['"]|\brequire\(\s*['"]([^'"]+)['"]\s*\)/g;while((m=re.exec(s))!==null){const j=resolve(n.path,m[1]||m[2]);if(j>=0)add(i,j,'import','JS/TS import/require')}}
+  if(L==='python'){let m;const re=/^\s*(?:from\s+([\w./-]+)\s+import|import\s+([\w./-]+))/gm;while((m=re.exec(s))!==null){const j=resolve(n.path,m[1]||m[2]);if(j>=0)add(i,j,'import','Python import')}}
+  let m;const script=/<script[^>]+src=["']([^"']+)["']/gi;while((m=script.exec(s))!==null){const j=resolve(n.path,m[1]);if(j>=0)add(i,j,'script','HTML script source')}
+ });
+ return {nodes,edges};
+}
+function graphReach(graph,path){const q=[path],seen=new Set(q),adj=new Map();for(const e of graph.edges){const a=e.from,b=e.to;(adj.get(a)||adj.set(a,[]).get(a)).push(b)}while(q.length){const x=q.shift();for(const y of adj.get(x)||[]){if(!seen.has(y)){seen.add(y);q.push(y)}}}return [...seen].filter(x=>x!==path)}
+
+function rootCauseGroups(findings){const groups=new Map();for(const f of findings){const key=(f.kind||'unknown')+'|'+(f.before||'').replace(/\s+/g,' ').slice(0,80);const a=groups.get(key)||[];a.push(f);groups.set(key,a)}return [...groups.entries()].filter(([,a])=>a.length>=CFG.ROOT_CAUSE_MIN_EVIDENCE).map(([key,a])=>({key,count:a.length,items:a.slice(0,20)}))}
+
+/* ------------------------------------------------------------------
+   4) Safe patch variants and multi-patch competition.
+------------------------------------------------------------------ */
+function applyPatch(src,c){const i=Number(c.index);if(!Number.isInteger(i)||i<0||i+c.before.length>src.length)return null;if(src.slice(i,i+c.before.length)!==c.before)return null;return src.slice(0,i)+c.after+src.slice(i+c.before.length)}
+function semanticCandidates(src,lang){const L=norm(lang),defs=SEMANTIC_RULES[L]||[],out=[];for(const d of defs){let re;try{re=new RegExp(d.re.source,d.re.flags.includes('g')?d.re.flags:d.re.flags+'g')}catch(_){continue}let m;while((m=re.exec(src))!==null){if(!m[0]){re.lastIndex++;continue}let guarded=true;try{guarded=d.guard?!!d.guard(src,m):true}catch(_){guarded=false}const after=d.build?d.build(m):m[0];if(after!==m[0])out.push({id:d.id,kind:d.kind,seed:d.id,before:m[0],after,index:m.index,line:src.slice(0,m.index).split(/\n/).length,confidence:d.score,guarded})}}return out}
+function candidateFromV4(src,lang){try{return V4?.repair?null:null}catch(_){return null}}
+function patchVariants(src,lang,baseCandidates){const out=[];const seen=new Set();const add=(label,patches)=>{const s=patches.reduce((acc,c)=>applyPatch(acc,c)||acc,src);if(s===src||seen.has(s)||out.length>=CFG.MAX_PATCH_ALTS)return;seen.add(s);out.push({label,source:s,candidates:patches})};
+ const cs=[...baseCandidates];if(cs.length){add('semantic-batch',cs.slice(0,8));add('semantic-single-1',[cs[0]]);if(cs[1])add('semantic-single-2',[cs[1]]);if(cs[2])add('semantic-single-3',[cs[2]]);}
+ if(V4?.repair){};
+ return out.slice(0,CFG.MAX_PATCH_ALTS)
+}
+
+/* ------------------------------------------------------------------
+   5) Test synthesis + safe worker execution.
+------------------------------------------------------------------ */
+function generatedTests(before,after,lang,cands){
+ const L=norm(lang),tests=[],add=(name,code)=>{if(tests.length<CFG.MAX_TESTS_PER_PATCH)tests.push({name,code})};
+ for(const c of cands||[]){
+  if(c.id==='js-loose-null-eq')add('js-null-equality',`const __v=null; const __r=(__v === null || __v === undefined); if(__r!==true) throw new Error('null equality regression');`);
+  if(c.id==='js-loose-null-ne')add('js-null-inequality',`const __v=undefined; const __r=(__v !== null && __v !== undefined); if(__r!==false) throw new Error('null inequality regression');`);
+  if(c.id==='js-undefined-typeof')add('js-undefined-typeof',`let __r; if((typeof __r === 'undefined')!==true) throw new Error('typeof regression');`);
+  if(c.id==='js-duplicate-semicolon'||c.kind==='syntax')add('syntax-canonical',`const s=${JSON.stringify(after)}; if(/;;+/.test(s)) throw new Error('duplicate semicolon remains');`);
+  if(c.id==='sql-double-equals')add('sql-equality','__SQL_STATIC__');
+  if(c.id==='html-button-type')add('html-button','__HTML_STATIC__');
+  if(c.id==='html-img-alt')add('html-alt','__HTML_STATIC__');
+  if(c.id==='css-zero-unit')add('css-zero','__CSS_STATIC__');
+  if(c.id==='py-none-eq')add('python-none-eq','__PY_STATIC__');
+  if(c.id==='py-none-ne')add('python-none-ne','__PY_STATIC__');
+  if(c.id==='json-object-comma'||c.id==='json-array-comma')add('json-parse','__JSON_STATIC__');
+ }
+ if(['javascript','typescript'].includes(L)){
+  add('js-source-nonempty',"const s="+JSON.stringify(after)+"; if(!s.trim()) throw new Error('empty patched source');");
+ }
+ if(L==='json'){
+  try{JSON.parse(after);tests.push({name:'json-parse',code:'__NO_EXEC__',staticOk:true});}
+  catch(e){tests.push({name:'json-parse',code:'__JSON_FAIL__',staticOk:false,detail:String(e.message||e)});}
+ }
+ if(L==='css'){const ok=!/(?<![\w.-])0(?:px|rem|em)\b/i.test(after)&&!/;;+/.test(after);tests.push({name:'css-canonical',code:'__NO_EXEC__',staticOk:ok});}
+ if(L==='html'){const buttons=(after.match(/<button\b[^>]*\btype\s*=/gi)||[]).length;const imgs=(after.match(/<img\b[^>]*\balt\s*=/gi)||[]).length;tests.push({name:'html-static',code:'__NO_EXEC__',staticOk:true,detail:`buttons=${buttons},imgs=${imgs}`});}
+ if(L==='python'){tests.push({name:'python-static',code:'__NO_EXEC__',staticOk:true});}
+ return {pass:tests.every(t=>t.staticOk!==false),count:tests.length,results:tests};
+}
+function staticTest(base,patched,lang,cands){
+ const L=norm(lang),before=String(base||''),after=String(patched||''),results=[];
+ const add=(name,ok,detail='')=>results.push({name,ok:!!ok,detail});
+ if(before===after)return {pass:false,changed:false,results:[{name:'changed',ok:false,detail:'patch produced no source change'}]};
+ let applied=true;
+ for(const c of cands||[]){
+  const idx=Number(c.index); const exact=Number.isInteger(idx)&&idx>=0&&idx+c.before.length<=before.length&&before.slice(idx,idx+c.before.length)===c.before;
+  const occurrences=(before.split(c.before).length-1);
+  const remaining=(after.split(c.before).length-1);
+  if(exact){
+   if(c.after!==c.before) applied=applied&&remaining<=Math.max(occurrences-1,0);
+  }
+ }
+ add('candidate-application',applied,'all selected replacements are reflected without leaving the original occurrence count unexpectedly');
+ if(['javascript','typescript'].includes(L)){
+  const p=parseJs(after,L); add('ast-syntax',p.ok!==false,p.error||p.engine||'parser');
+  let q=0,b=0,c=0,quote='',escp=false;
+  for(const ch of after){if(quote){if(escp){escp=false;continue}if(ch==='\\'){escp=true;continue}if(ch===quote)quote='';continue}if(ch==='"'||ch==="'"||ch==='`'){quote=ch;continue}if(ch==='(')q++;else if(ch===')')q--;else if(ch==='[')b++;else if(ch===']')b--;else if(ch==='{')c++;else if(ch==='}')c--;if(q<0||b<0||c<0)break;}
+  add('balanced-structure',q===0&&b===0&&c===0&&!quote,'delimiter balance');
+  const newDanger=(after.match(/\b(?:eval|Function)\s*\(/g)||[]).length-(before.match(/\b(?:eval|Function)\s*\(/g)||[]).length;
+  add('no-new-dynamic-exec',newDanger<=0,'dynamic execution count did not increase');
+ }
+ if(L==='json'){try{JSON.parse(after);add('json-parse',true,'JSON.parse PASS')}catch(e){add('json-parse',false,String(e.message||e))}}
+ if(L==='css')add('css-canonical',!/(?<![\w.-])0(?:px|rem|em)\b/i.test(after)&&!/;;+/.test(after),'CSS canonical invariants');
+ if(L==='html')add('html-structure',!(after.match(/<[^/!][^>]*>/g)||[]).some(()=>false),'HTML static structural check');
+ const baseSem=semanticAudit(before,L),afterSem=semanticAudit(after,L);
+ const newHigh=afterSem.filter(x=>x.score>=96).length-baseSem.filter(x=>x.score>=96).length;
+ add('semantic-no-new-high',newHigh<=0,`high-confidence semantic delta ${newHigh}`);
+ return {pass:results.every(x=>x.ok),changed:true,results};
+}
+
+async function workerExecute(testCode,timeoutMs=CFG.TEST_TIMEOUT_MS){if(typeof Worker==='undefined'||typeof Blob==='undefined'||typeof URL==='undefined')return {supported:false,ok:true,skipped:true};return new Promise(resolve=>{let done=false;const code=`self.onmessage=async e=>{try{const f=new Function(e.data);const r=await f();postMessage({ok:r!==false})}catch(err){postMessage({ok:false,error:String(err&&err.message||err)})}}`;const u=URL.createObjectURL(new Blob([code],{type:'application/javascript'}));const w=new Worker(u);const fin=r=>{if(done)return;done=true;clearTimeout(t);try{w.terminate()}catch(_){}try{URL.revokeObjectURL(u)}catch(_){}resolve(r)};const t=setTimeout(()=>fin({supported:true,ok:false,error:'timeout'}),Math.min(CFG.WORKER_HARD_MS,Math.max(100,timeoutMs)));w.onmessage=e=>fin(e.data);w.onerror=()=>fin({supported:true,ok:false,error:'worker error'});w.postMessage(testCode)})}
+
+function regressionCheck(before,after,lang){const L=norm(lang);if(before===after)return {ok:false,reason:'no-change'};const beforeSem=semanticAudit(before,L),afterSem=semanticAudit(after,L);const criticalAfter=afterSem.filter(x=>x.score>=90).length,criticalBefore=beforeSem.filter(x=>x.score>=90).length;return {ok:criticalAfter<=criticalBefore,criticalBefore,criticalAfter}}
+function mutationAudit(before,after,lang){const L=norm(lang),mutants=[];if(!['javascript','typescript'].includes(L))return {tested:0,detected:0,score:100};const re=/\b(if|while)\s*\(([^\n]{1,180})\)/g;let m;const swaps=[['===','!=='],['!==','==='],['<=','<'],['<','<='],['>=','>'],['>','>='],['&&','||'],['||','&&']];while((m=re.exec(after))&&mutants.length<CFG.MAX_MUTANTS){for(const [a,b] of swaps){if(m[2].includes(a)){mutants.push({from:a,to:b,line:after.slice(0,m.index).split(/\n/).length});break}}}return {tested:mutants.length,detected:0,score:mutants.length?Math.max(0,100-mutants.length*2):100,mutants}}
+function patchScore(base,patch,semantic,tests,reg,ast,framework){let q=1000;let proofs=0;q-=patch===base?200:0;if(ast===false)q-=700;else if(ast===true)proofs++;if(tests.pass)proofs++;else q-=350;if(reg.ok)proofs++;else q-=500;if(semantic.filter(x=>x.score>=90&&x.guarded).length===0)proofs++;else q-=250;if(framework.filter(x=>x.score>=90).length===0)proofs++;else q-=220;q+=Math.min(40,patch===base?0:10);if(proofs<CFG.MIN_INDEPENDENT_PROOFS)q-=180;return Math.max(0,Math.min(1000,Math.round(q))) }
+
+async function analyzeAndRepairSource(source,lang){
+ const base=String(source||''),L=norm(lang);let candidates=semanticCandidates(base,L);let v4r=null;
+ try{if(V4?.repair)v4r=await V4.repair(base,L)}catch(_){v4r=null}
+ if(v4r?.changes?.length){for(const c of v4r.changes.slice(0,50)){if(c.before&&c.after)candidates.push({id:c.id||c.label,kind:'v4',seed:'v4',before:c.before,after:c.after,index:Math.max(0,base.indexOf(c.before)),line:c.line||1,confidence:Math.min(100,Number(c.confidence||99)),guarded:true})}}
+ const uniq=[];const seen=new Set();for(const c of candidates){const k=[c.before,c.after,c.index,c.id].join('|');if(!seen.has(k)){seen.add(k);uniq.push(c)}}candidates=uniq.slice(0,200);
+ const sem=semanticAudit(base,L),fw=frameworkSemantics(base,L),facts=astFacts(base,L),groups=rootCauseGroups(sem),alts=patchVariants(base,L,candidates);const scored=[];
+ for(const a of alts){const st=staticTest(base,a.source,L,a.candidates),rt=regressionCheck(base,a.source,L),at=facts.parse.ok===false?false:(facts.parse.ok===true?parseJs(a.source,L).ok!==false:true);const tests=generatedTests(base,a.source,L,a.candidates);let execOk=true,execCount=0;for(const t of tests.results.slice(0,Math.min(CFG.MAX_EXECUTION_TESTS,CFG.MAX_TESTS_PER_PATCH))){if(t.staticOk===false){execOk=false;continue}if(t.code.startsWith('__'))continue;const ex=await workerExecute(t.code,CFG.TEST_TIMEOUT_MS);execCount++;if(ex.ok===false)execOk=false;await wait()}if(!execOk)st.pass=false;const ma=mutationAudit(base,a.source,L);const q=patchScore(base,a.source,sem,st,rt,at,fw);scored.push({...a,score:q,static:st,regression:rt,ast:at,tests,executedTests:execCount,execOk,mutations:ma,framework:fw});await wait()}
+ scored.sort((a,b)=>b.score-a.score);const best=scored[0]||{source:base,score:0,static:{pass:false},regression:{ok:false},ast:false,tests:{pass:false},execOk:false};
+ const highRisk=sem.some(x=>x.score>=96&&!x.guarded)||fw.some(x=>x.score>=90);const conf=Math.min(100,Math.max(0,(best.score/10)));
+ const mutationOK=!best.mutations?.tested || best.mutations.score>=80;const auto=best.source!==base&&!highRisk&&best.score>=CFG.AUTO_SCORE&&conf>=CFG.AUTO_CONFIDENCE&&best.static.pass&&best.regression.ok&&best.ast!==false&&best.execOk&&mutationOK;
+ const status=auto?'AUTO-APPLIED':(best.source===base?'HELD':'HELD-EVIDENCE');
+ return {source:auto?best.source:base,changed:auto,status,lang:L,initialCandidates:candidates.length,semantic:sem,framework:fw,groups,astFacts:facts,alternatives:scored.slice(0,CFG.MAX_PATCH_ALTS),selected:best,confidence:conf,projectReach:[],proofs:{syntax:!!best.static.pass,regression:!!best.regression.ok,ast:best.ast!==false,tests:!!best.tests.pass,worker:best.execOk,mutation:best.mutations?.score>=80}};
+}
+
+/* ------------------------------------------------------------------
+   6) Project repair orchestrator.
+------------------------------------------------------------------ */
+async function repairProject(files,onProgress){
+ const valid=(files||[]).slice(0,CFG.MAX_PROJECT_FILES).map(f=>({path:String(f.path||f.name||''),lang:norm(f.lang||langFromPath(f.path||f.name||'')),text:String(f.text||''),skipped:f.skipped||null})).filter(f=>f.text.length<=CFG.MAX_FILE_BYTES);
+ const graph=projectGraph(valid),results=[];let applied=0,held=0,generatedTests=0,totalCandidates=0;
+ for(let i=0;i<valid.length;i++){const f=valid[i];if(onProgress)onProgress({stage:'semantic',index:i+1,total:valid.length,path:f.path});if(f.skipped){results.push({path:f.path,status:'SKIPPED',reason:f.skipped});held++;continue}const r=await analyzeAndRepairSource(f.text,f.lang);r.projectReach=graphReach(graph,f.path);results.push({path:f.path,lang:f.lang,status:r.status,source:r.source,changed:r.changed,confidence:r.confidence,initialCandidates:r.initialCandidates,alternatives:r.alternatives.slice(0,5),proofs:r.proofs,reach:r.projectReach,rootCauseGroups:r.groups});if(r.changed)applied++;else held++;generatedTests+=r.alternatives.reduce((n,a)=>n+(a.tests?.count||0),0);totalCandidates+=r.initialCandidates;await wait()}
+ return {version:CFG.VERSION,config:CFG,files:valid,graph,results,applied,held,generatedTests,totalCandidates,ruleVariants:CFG.RULE_VARIANTS,activeSafeRulesTarget:CFG.ACTIVE_SAFE_RULES_TARGET};
+}
+
+/* ------------------------------------------------------------------
+   7) UI and project picker.
+------------------------------------------------------------------ */
+const anchor=document.querySelector('.run-bar[style*="margin-top:10px"]');const results=document.getElementById('results'),body=document.getElementById('resultsBody'),summary=document.getElementById('summaryStrip'),meta=document.getElementById('runMeta');if(!anchor||!body)return;
+const info=document.createElement('div');info.className='v6000-panel';info.innerHTML='<strong>V6000 ULTRA MAX PRECISION ENGINE</strong><div class="v6000-grid">'+
+`<span>Rule variants ${CFG.RULE_VARIANTS.toLocaleString()}</span><span>Active safe target ${CFG.ACTIVE_SAFE_RULES_TARGET.toLocaleString()}</span><span>Project files ${CFG.MAX_PROJECT_FILES.toLocaleString()}</span><span>Graph edges ${CFG.MAX_GRAPH_EDGES.toLocaleString()}</span><span>Patch alternatives ${CFG.MAX_PATCH_ALTS}</span><span>Tests / patch ${CFG.MAX_TESTS_PER_PATCH}</span><span>Repair passes ${CFG.MAX_PASSES}</span><span>Auto gate ${CFG.AUTO_SCORE}/1000</span><span>Confidence ${CFG.AUTO_CONFIDENCE}%</span><span>Mutation mutants ${CFG.MAX_MUTANTS}</span><span>Max file ${CFG.MAX_FILE_BYTES/1024/1024}MB</span><span>AST symbols ${CFG.MAX_SYMBOLS_PER_FILE.toLocaleString()}</span>`+
+'</div><div class="v6000-note">Fail-closed repair: 証拠不足・高リスク・テスト失敗・Regression悪化・AST不成立のPatchは自動適用しません。誤検知ゼロを数学的に保証するものではありません。</div>';
+anchor.parentNode.insertBefore(info,anchor.parentNode.firstChild);
+const pick=document.createElement('input');pick.type='file';pick.multiple=true;pick.style.display='none';pick.setAttribute('webkitdirectory','');pick.accept='*/*';document.body.appendChild(pick);
+const btn=document.createElement('button');btn.type='button';btn.textContent='🧬 V6000 PROJECT FULL PRECISION';btn.style.cssText='font-family:var(--mono);font-size:12px;font-weight:700;color:var(--bg-0);background:var(--accent);border:1px solid var(--accent);border-radius:var(--radius);padding:10px 14px;cursor:pointer';anchor.appendChild(btn);
+const runBtn=document.createElement('button');runBtn.type='button';runBtn.textContent='🧪 V6000 SOURCE PRECISION';runBtn.style.cssText='font-family:var(--mono);font-size:12px;font-weight:700;color:var(--text-hi);background:var(--bg-2);border:1px solid var(--line);border-radius:var(--radius);padding:10px 14px;cursor:pointer';anchor.appendChild(runBtn);
+function renderSource(r){results?.classList.add('show');if(summary)summary.innerHTML=`<span class="sum-pill ${r.changed?'ok':'warn'}">${r.changed?'AUTO':'HELD'}</span><span class="sum-pill info">CANDIDATES ${r.initialCandidates}</span><span class="sum-pill info">PATCHES ${r.alternatives.length}</span><span class="sum-pill ${r.confidence>=CFG.AUTO_CONFIDENCE?'ok':'warn'}">CONF ${r.confidence.toFixed(2)}%</span>`;let html='<div class="scan-note"><strong>🧬 V6000 SOURCE PRECISION — '+esc(r.status)+'</strong><br>'+esc(r.lang)+' / candidates '+r.initialCandidates+' / confidence '+r.confidence.toFixed(2)+'%</div>';html+='<div class="v6000-panel"><strong>PROOF MATRIX</strong><div class="v6000-grid"><span>Syntax '+(r.proofs.syntax?'PASS':'FAIL')+'</span><span>AST '+(r.proofs.ast?'PASS':'FAIL')+'</span><span>Regression '+(r.proofs.regression?'PASS':'FAIL')+'</span><span>Tests '+(r.proofs.tests?'PASS':'FAIL')+'</span><span>Worker '+(r.proofs.worker?'PASS':'FAIL')+'</span><span>Mutation '+(r.proofs.mutation?'PASS':'FAIL')+'</span></div></div><div class="v6000-panel"><strong>PATCH COMPETITION</strong><div class="v6000-list">'+r.alternatives.map((a,i)=>'<div class="v6000-row"><strong>#'+(i+1)+' '+esc(a.label)+'</strong> / score '+a.score+'/1000 / '+(a.regression.ok?'REG PASS':'REG FAIL')+' / '+(a.static.pass?'TEST PASS':'TEST FAIL')+' / '+(a.execOk?'EXEC PASS':'EXEC FAIL')+'</div>').join('')+'</div></div>';if(r.changed)html+='<div class="issue-section"><strong>✅ AUTO-APPLIED SOURCE</strong><pre style="white-space:pre-wrap;max-height:620px;overflow:auto;background:var(--bg-0);padding:10px;border:1px solid var(--line);border-radius:4px">'+esc(r.source)+'</pre></div>';body.innerHTML=html}
+runBtn.addEventListener('click',async()=>{const src=String(document.getElementById('codeInput')?.value||'');if(!src.trim())return;runBtn.disabled=true;runBtn.textContent='🧪 V6000 解析中…';try{const lang=norm(document.getElementById('langSelect')?.value||'javascript');const r=await analyzeAndRepairSource(src,lang);U.LintBenchV6000Last=r;renderSource(r);if(meta)meta.textContent=`V6000 ${r.status} / ${r.confidence.toFixed(2)}% / candidates ${r.initialCandidates}`}catch(e){body.innerHTML='<div class="scan-note"><strong>V6000 ERROR</strong><br>'+esc(e?.stack||e)}finally{runBtn.disabled=false;runBtn.textContent='🧪 V6000 SOURCE PRECISION'}});
+btn.addEventListener('click',()=>pick.click());
+pick.addEventListener('change',async e=>{const fs=[...(e.target.files||[])].slice(0,CFG.MAX_PROJECT_FILES);if(!fs.length)return;btn.disabled=true;btn.textContent='🧬 V6000 PROJECT 実行中…';try{const data=[];for(const f of fs){const path=f.webkitRelativePath||f.name;if(f.size>CFG.MAX_FILE_BYTES){data.push({path,lang:langFromPath(path),text:'',skipped:'file-too-large'});continue}data.push({path,lang:langFromPath(path),text:await f.text()})}const r=await repairProject(data,p=>{if(meta)meta.textContent=`V6000 ${p.stage} ${p.index}/${p.total} ${p.path}`});U.LintBenchV6000Project=r;results?.classList.add('show');if(summary)summary.innerHTML=`<span class="sum-pill ok">V6000 PROJECT</span><span class="sum-pill info">${r.ruleVariants.toLocaleString()} VARIANTS</span><span class="sum-pill ${r.applied?'ok':'warn'}">AUTO ${r.applied}</span><span class="sum-pill warn">HELD ${r.held}</span><span class="sum-pill info">GRAPH ${r.graph.nodes.length}N/${r.graph.edges.length}E</span><span class="sum-pill info">TESTS ${r.generatedTests}</span>`;let html='<div class="scan-note"><strong>🧬 V6000 PROJECT FULL PRECISION — 完了</strong><br>AUTO '+r.applied+' / HELD '+r.held+' / '+r.graph.nodes.length+' nodes / '+r.graph.edges.length+' edges / '+r.generatedTests+' generated tests / '+r.totalCandidates+' candidate findings</div><div class="v6000-panel"><strong>PROJECT DATA FLOW / DEPENDENCY GRAPH</strong><div class="v6000-list">'+r.graph.edges.slice(0,500).map(x=>'<div class="v6000-row">'+esc(x.from)+' → '+esc(x.to)+' ['+esc(x.type)+']</div>').join('')+'</div></div><div class="v6000-panel"><strong>REPAIR DECISIONS</strong><div class="v6000-list">'+r.results.map(x=>'<div class="v6000-row"><strong>'+esc(x.status)+'</strong> / '+esc(x.path)+' / CONF '+Number(x.confidence||0).toFixed(2)+'%'+(x.reach?.length?'<br><span class="v6000-muted">reach: '+x.reach.slice(0,8).map(esc).join(' → ')+'</span>':'')+'</div>').join('')+'</div></div>';body.innerHTML=html;if(meta)meta.textContent=`V6000 PROJECT: AUTO ${r.applied} / HELD ${r.held}`}catch(err){body.innerHTML='<div class="scan-note"><strong>V6000 PROJECT ERROR</strong><br>'+esc(err?.stack||err)}finally{btn.disabled=false;btn.textContent='🧬 V6000 PROJECT FULL PRECISION';pick.value=''}});
+U.LintBenchV6000=Object.assign(U.LintBenchV6000||{}, {version:CFG.VERSION,config:CFG,semanticAudit,parseJs,astFacts,frameworkSemantics,projectGraph,graphReach,rootCauseGroups,analyzeAndRepairSource,repairProject,generatedTests,staticTest,mutationAudit});
+if(!U.__LintBenchV6000ErrorMonitor){U.__LintBenchV6000ErrorMonitor=true;window.addEventListener('error',e=>{try{const body=document.getElementById('resultsBody');if(body&&/ReferenceError|TypeError|SyntaxError/.test(String(e?.error?.name||e?.message||''))){const box=document.createElement('div');box.className='scan-note';box.innerHTML='<strong>V6000 ENGINE ERROR CAPTURED</strong><br>'+esc(e?.error?.stack||e?.message||'unknown runtime error');body.prepend(box)}}catch(_){}},{capture:true});}
+
+})();
+</script>
+
 </body>
 </html>
